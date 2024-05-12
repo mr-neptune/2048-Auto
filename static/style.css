@@ -1,0 +1,129 @@
+body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #faf8ef;
+    font-family: 'Arial', sans-serif; /* You can use your preferred font */
+}
+
+.container {
+    width: fit-content; /* Adjust width based on content */
+    margin: auto;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    width: 500px; /* Set this to match the width of your game board */
+    margin-bottom: 20px;
+}
+
+.button-new-game {
+    background-color: #8f7a66; /* Color for the button */
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+.score-tab {
+    background-color: #bbada0; /* Color for the score tab */
+    color: white;
+    padding: 10px;
+    border-radius: 5px;
+    font-weight: bold;
+    font-size: 18px;
+    min-width: 100px; /* Adjust as needed */
+    text-align: center;
+}
+
+#game-container {
+    text-align: center;
+}
+
+.grid {
+    display: inline-block;
+    background-color: #bbada0;
+    padding: 10px;
+    border-radius: 10px;
+    box-sizing: border-box;
+}
+
+.grid-row {
+    display: flex;
+}
+
+.grid-cell {
+    width: 90px; /* Adjust the size as necessary */
+    height: 90px; /* Adjust the size as necessary */
+    background-color: #cdc1b4;
+    margin: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    font-weight: bold;
+    color: #776e65;
+    border-radius: 5px;
+    position: relative; /* Make sure this is relative */
+    overflow: hidden; /* Prevents content from spilling outside */
+}
+
+/* Styles for sliding tiles */
+.tile {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: transform 0.2s ease; /* Sliding effect */
+}
+
+/* New styles for tile colors */
+.tile-2 { background-color: #eee4da; }
+.tile-4 { background-color: #ede0c8; }
+.tile-8 { background-color: #f2b179; }
+.tile-16 { background-color: #f59563; }
+.tile-32 { background-color: #f67c5f; }
+.tile-64 { background-color: #f65e3b; }
+.tile-super { background-color: #edcf72; }
+
+
+.game-over-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(238, 228, 218, 0.5); /* Semi-transparent overlay */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    font-size: 36px;
+    color: #776e65;
+    animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.new-game-button {
+    padding: 10px;
+    margin-top: 20px;
+    border-radius: 5px;
+    border: none;
+    background-color: #8f7a66;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+}
