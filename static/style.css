@@ -13,10 +13,23 @@ body {
     margin: auto;
 }
 
+.game-area {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+}
+
+.board-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
 .header {
     display: flex;
     justify-content: space-between;
-    width: 500px; /* Set this to match the width of your game board */
+    width: 100%;
+    max-width: 500px; /* Match board width */
     margin-bottom: 20px;
 }
 
@@ -44,10 +57,100 @@ body {
 
 #game-container {
     text-align: center;
+    position: relative;
+    display: inline-block;
+}
+
+.control-panel {
+    background: #f3e6d4;
+    border-radius: 10px;
+    padding: 20px;
+    width: 220px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+.control-panel h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 22px;
+    color: #776e65;
+}
+
+.control-section {
+    margin-bottom: 20px;
+}
+
+.control-label {
+    margin: 0 0 8px;
+    font-weight: bold;
+    color: #8f7a66;
+}
+
+.control-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    color: #776e65;
+}
+
+.control-option input[type="radio"] {
+    accent-color: #8f7a66;
+}
+
+.control-option small {
+    font-size: 12px;
+    color: #9b8b7f;
+}
+
+.button-auto-play {
+    width: 100%;
+    padding: 10px 16px;
+    background-color: #8f7a66;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.button-auto-play:hover {
+    background-color: #7c6956;
+}
+
+.button-auto-play.is-active {
+    background-color: #5c9570;
+}
+
+.button-auto-play.is-active:hover {
+    background-color: #4e815f;
+}
+
+.control-status {
+    min-height: 24px;
+    margin-top: 12px;
+    font-size: 14px;
+    color: #776e65;
+}
+
+.control-status.warning {
+    color: #c46b47;
+}
+
+.control-status.success {
+    color: #5c9570;
+}
+
+.control-status.info {
+    color: #6b6b6b;
 }
 
 .grid {
     display: inline-block;
+    position: relative;
     background-color: #bbada0;
     padding: 10px;
     border-radius: 10px;
@@ -59,40 +162,170 @@ body {
 }
 
 .grid-cell {
-    width: 90px; /* Adjust the size as necessary */
-    height: 90px; /* Adjust the size as necessary */
-    background-color: #cdc1b4;
+    width: 90px;
+    height: 90px;
     margin: 5px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 24px;
-    font-weight: bold;
-    color: #776e65;
     border-radius: 5px;
-    position: relative; /* Make sure this is relative */
-    overflow: hidden; /* Prevents content from spilling outside */
+    background: rgba(238, 228, 218, 0.35);
 }
 
-/* Styles for sliding tiles */
+.tile-container {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    --tile-size: 90px;
+}
+
 .tile {
     position: absolute;
-    width: 100%;
-    height: 100%;
+    width: var(--tile-size);
+    height: var(--tile-size);
     display: flex;
-    justify-content: center;
     align-items: center;
-    transition: transform 0.2s ease; /* Sliding effect */
+    justify-content: center;
+    font-weight: bold;
+    font-size: 32px;
+    border-radius: 5px;
+    transform: translate(var(--x, 0px), var(--y, 0px));
+    transition: transform 0.18s ease-in-out;
+    will-change: transform;
+    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+    z-index: 2;
 }
 
-/* New styles for tile colors */
-.tile-2 { background-color: #eee4da; }
-.tile-4 { background-color: #ede0c8; }
-.tile-8 { background-color: #f2b179; }
-.tile-16 { background-color: #f59563; }
-.tile-32 { background-color: #f67c5f; }
-.tile-64 { background-color: #f65e3b; }
-.tile-super { background-color: #edcf72; }
+.tile.tile-128,
+.tile.tile-256,
+.tile.tile-512 {
+    font-size: 28px;
+}
+
+.tile.tile-1024,
+.tile.tile-2048,
+.tile.tile-super {
+    font-size: 24px;
+}
+
+.tile-new {
+    animation: tileAppear 0.2s ease;
+}
+
+.tile-merged {
+    animation: tileMerge 0.25s ease;
+}
+
+@keyframes tileAppear {
+    from {
+        transform: translate(var(--x, 0px), var(--y, 0px)) scale(0.3);
+        opacity: 0;
+    }
+    to {
+        transform: translate(var(--x, 0px), var(--y, 0px)) scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes tileMerge {
+    0% {
+        transform: translate(var(--x, 0px), var(--y, 0px)) scale(0.85);
+    }
+    60% {
+        transform: translate(var(--x, 0px), var(--y, 0px)) scale(1.05);
+    }
+    100% {
+        transform: translate(var(--x, 0px), var(--y, 0px)) scale(1);
+    }
+}
+
+/* Tile colors */
+.tile.tile-2 {
+    background-color: #eee4da;
+    color: #776e65;
+}
+
+.tile.tile-4 {
+    background-color: #ede0c8;
+    color: #776e65;
+}
+
+.tile.tile-8 {
+    background-color: #f2b179;
+    color: #f9f6f2;
+}
+
+.tile.tile-16 {
+    background-color: #f59563;
+    color: #f9f6f2;
+}
+
+.tile.tile-32 {
+    background-color: #f67c5f;
+    color: #f9f6f2;
+}
+
+.tile.tile-64 {
+    background-color: #f65e3b;
+    color: #f9f6f2;
+}
+
+.tile.tile-128 {
+    background-color: #edcf72;
+    color: #f9f6f2;
+}
+
+.tile.tile-256 {
+    background-color: #edcc61;
+    color: #f9f6f2;
+}
+
+.tile.tile-512 {
+    background-color: #edc850;
+    color: #f9f6f2;
+}
+
+.tile.tile-1024 {
+    background-color: #edc53f;
+    color: #f9f6f2;
+}
+
+.tile.tile-2048 {
+    background-color: #edc22e;
+    color: #f9f6f2;
+}
+
+.tile.tile-super {
+    background-color: #3c3a32;
+    color: #f9f6f2;
+}
+
+@media (max-width: 900px) {
+    body {
+        align-items: flex-start;
+    }
+
+    .container {
+        margin-top: 40px;
+    }
+
+    .game-area {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .control-panel {
+        width: 100%;
+        max-width: 500px;
+    }
+
+    .board-area {
+        width: 100%;
+        align-items: center;
+    }
+
+    .header {
+        max-width: none;
+    }
+}
 
 
 .game-over-overlay {
@@ -110,6 +343,7 @@ body {
     font-size: 36px;
     color: #776e65;
     animation: fadeIn 0.5s;
+    z-index: 3;
 }
 
 @keyframes fadeIn {

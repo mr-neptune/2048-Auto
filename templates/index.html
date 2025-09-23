@@ -9,36 +9,76 @@
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <button class="button-new-game" onclick="newGame()">New Game</button>
-            <div class="score-tab">Score: <span id="current-score">0</span></div>
-        </div>
-        <div id="game-container">
-            <div class="grid">
-                <!-- Generate grid cells -->
-                <div class="grid-row">
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
+        <div class="game-area">
+            <aside class="control-panel" aria-label="Computer play controls">
+                <h2>Computer Play</h2>
+                <div class="control-section">
+                    <p class="control-label">Method</p>
+                    <label class="control-option">
+                        <input type="radio" name="play-method" value="random" checked>
+                        <span>Random Movements</span>
+                    </label>
+                    <label class="control-option">
+                        <input type="radio" name="play-method" value="algorithm">
+                        <span>Algorithm Based <small>(coming soon)</small></span>
+                    </label>
+                    <label class="control-option">
+                        <input type="radio" name="play-method" value="smart">
+                        <span>Smart <small>(RL coming soon)</small></span>
+                    </label>
                 </div>
-                <div class="grid-row">
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
+                <div class="control-section">
+                    <p class="control-label">Speed</p>
+                    <label class="control-option">
+                        <input type="radio" name="play-speed" value="slow">
+                        <span>Slow</span>
+                    </label>
+                    <label class="control-option">
+                        <input type="radio" name="play-speed" value="normal" checked>
+                        <span>Normal</span>
+                    </label>
+                    <label class="control-option">
+                        <input type="radio" name="play-speed" value="fast">
+                        <span>Fast</span>
+                    </label>
                 </div>
-                <div class="grid-row">
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
+                <button id="auto-play-toggle" class="button-auto-play" type="button">Start Auto Play</button>
+                <p id="control-status" class="control-status" role="status" aria-live="polite"></p>
+            </aside>
+            <div class="board-area">
+                <div class="header">
+                    <button class="button-new-game" onclick="newGame()">New Game</button>
+                    <div class="score-tab">Score: <span id="current-score">0</span></div>
                 </div>
-                <div class="grid-row">
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
-                    <div class="grid-cell"></div>
+                <div id="game-container">
+                    <div class="grid">
+                        <div class="tile-container"></div>
+                        <!-- Generate grid cells -->
+                        <div class="grid-row">
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                        </div>
+                        <div class="grid-row">
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                        </div>
+                        <div class="grid-row">
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                        </div>
+                        <div class="grid-row">
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                            <div class="grid-cell"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
