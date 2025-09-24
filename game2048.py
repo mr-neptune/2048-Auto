@@ -94,6 +94,49 @@ class Game2048:
         self.transpose()
         return board_changed
 
+    def _apply_move_without_spawn(self, action):
+        """Apply a move without adding a new tile and return if the board changed."""
+        if action == 0:
+            return self.move_up()
+        if action == 1:
+            return self.move_right()
+        if action == 2:
+            return self.move_down()
+        if action == 3:
+            return self.move_left()
+        raise ValueError(f"Unsupported action: {action}")
+
+    def peek_move(self, action):
+        """Return the resulting board and score delta if an action were applied."""
+        original_board = self.board.copy()
+        original_score = self.score
+
+        board_changed = self._apply_move_without_spawn(action)
+        score_delta = self.score - original_score
+        preview_board = self.board.copy()
+
+        self.board = original_board
+        self.score = original_score
+
+        return preview_board, score_delta, board_changed
+
+    def get_available_actions(self):
+        """Return actions that would change the board state."""
+        original_board = self.board.copy()
+        original_score = self.score
+
+        available_actions = []
+        for action in range(4):
+            self.board = original_board.copy()
+            self.score = original_score
+            if self._apply_move_without_spawn(action):
+                available_actions.append(action)
+
+        self.board = original_board
+        self.score = original_score
+
+        return available_actions
+
     def step(self, action):
         """Apply an action to the game board (0: up, 1: right, 2: down, 3: left)."""
         board_changed = False
