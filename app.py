@@ -1,9 +1,9 @@
 from flask import Flask, jsonify, request, render_template
-from game2048 import Game2048  # Ensure this matches your game logic file
+from game2048 import Game2048
 import numpy as np
 
 app = Flask(__name__)
-game = Game2048()  # Initialize your game here
+game = Game2048()  # Initialize game here
 
 @app.route('/')
 def home():

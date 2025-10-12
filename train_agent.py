@@ -38,8 +38,8 @@ class QLearningAgent:
 
     def __init__(
         self,
-        gamma: float = 0.99,
-        alpha: float = 0.1,
+        gamma: float = 0.99,        
+        alpha: float = 0.1,         # Learning rate
         epsilon: float = 1.0,
         epsilon_decay: float = 0.995,
         epsilon_min: float = 0.05,
