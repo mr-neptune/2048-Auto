@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
 import argparse
 import os
 import pickle
@@ -25,6 +29,10 @@ def flatten_state(board: np.ndarray) -> StateKey:
     """Convert the board to a hashable representation for the Q-table."""
     return tuple(int(value) for value in board.flatten())
 
+def encode_state(board: np.ndarray) -> np.ndarray:
+    b = board.copy()
+    b[b == 0] = 1
+    return (np.log2(b).astype(np.float32) - 1.0).ravel()       # shape (16,)
 
 @dataclass
 class EpisodeStats:
