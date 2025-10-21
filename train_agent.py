@@ -6,6 +6,7 @@ import argparse
 import os
 import pickle
 import random
+import csv
 from collections import deque
 from dataclasses import dataclass
 from statistics import mean
@@ -192,6 +193,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-path", type=str, default="bin/q_table.pkl", help="Path to store the trained Q-table")
     parser.add_argument("--load-path", type=str, default="", help="Optional path to an existing Q-table to continue training")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument(
+        "--metrics-path",
+        type=str,
+        default="",
+        help="Optional path to a CSV file where per-episode metrics are written",
+    )
+    parser.add_argument(
+        "--metrics-append",
+        action="store_true",
+        help="Append to an existing metrics file instead of overwriting it",
+    )
     return parser.parse_args()
 
 
@@ -215,18 +227,55 @@ def main() -> None:
     env = Game2048()
     recent_stats: Deque[EpisodeStats] = deque(maxlen=args.log_interval)
 
-    for episode in range(1, args.episodes + 1):
-        stats = run_episode(agent, env, train=True, step_penalty=args.step_penalty)
-        recent_stats.append(stats)
+    metrics_file = None
+    metrics_writer = None
+    if args.metrics_path:
+        metrics_dir = os.path.dirname(args.metrics_path)
+        if metrics_dir:
+            os.makedirs(metrics_dir, exist_ok=True)
+        open_mode = "a" if args.metrics_append else "w"
+        should_write_header = True
+        if args.metrics_append and os.path.exists(args.metrics_path):
+            try:
+                should_write_header = os.path.getsize(args.metrics_path) == 0
+            except OSError:
+                should_write_header = True
+        metrics_file = open(args.metrics_path, open_mode, newline="", encoding="utf-8")
+        fieldnames = ["episode", "score", "reward", "moves", "max_tile"]
+        metrics_writer = csv.DictWriter(metrics_file, fieldnames=fieldnames)
+        if not args.metrics_append or should_write_header:
+            metrics_writer.writeheader()
+            metrics_file.flush()
 
-        if episode % args.log_interval == 0:
-            avg_score = mean(stat.score for stat in recent_stats)
-            avg_reward = mean(stat.reward for stat in recent_stats)
-            best_tile = max(stat.max_tile for stat in recent_stats)
-            print(
-                f"Episode {episode:>5}: avg score={avg_score:8.1f} | avg reward={avg_reward:8.1f} | "
-                f"best tile={best_tile:4d} | epsilon={agent.epsilon:.3f}"
-            )
+    try:
+        for episode in range(1, args.episodes + 1):
+            stats = run_episode(agent, env, train=True, step_penalty=args.step_penalty)
+            recent_stats.append(stats)
+
+            if metrics_writer and metrics_file:
+                metrics_writer.writerow(
+                    {
+                        "episode": episode,
+                        "score": stats.score,
+                        "reward": stats.reward,
+                        "moves": stats.moves,
+                        "max_tile": stats.max_tile,
+                    }
+                )
+                metrics_file.flush()
+
+            if episode % args.log_interval == 0:
+                avg_score = mean(stat.score for stat in recent_stats)
+                avg_reward = mean(stat.reward for stat in recent_stats)
+                best_tile = max(stat.max_tile for stat in recent_stats)
+                print(
+                    f"Episode {episode:>5}: avg score={avg_score:8.1f} | avg reward={avg_reward:8.1f} | "
+                    f"best tile={best_tile:4d} | epsilon={agent.epsilon:.3f}"
+                )
+    finally:
+        if metrics_file:
+            metrics_file.flush()
+            metrics_file.close()
 
     if args.save_path:
         agent.save(args.save_path)
