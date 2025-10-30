@@ -26,15 +26,15 @@ from features import encode_state_with_features, shaping_reward
 Action = int
 StateKey = Tuple[int, ...]
 
-
+"""
 def flatten_state(board: np.ndarray) -> StateKey:
-    """Convert the board to a hashable representation for the Q-table."""
     return tuple(int(value) for value in board.flatten())
 
 def encode_state(board: np.ndarray) -> np.ndarray:
     b = board.copy()
     b[b == 0] = 1
     return (np.log2(b).astype(np.float32) - 1.0).ravel()       # shape (16,)
+"""
 
 @dataclass
 class EpisodeStats:
@@ -330,10 +330,7 @@ def main() -> None:
 
     recent_stats: Deque[EpisodeStats] = deque(maxlen=args.log_interval)
 
-    # --- CSV section: keep exactly as you already implemented ---
-    # (no changes needed, omit here for brevity)
-    # ------------------------------------------------------------
-
+    # --- CSV section---
     try:
         for episode in range(1, args.episodes + 1):
             stats = run_episode(agent, env, train=True, step_penalty=args.step_penalty, buffer=buffer)
@@ -341,7 +338,7 @@ def main() -> None:
 
             # metrics_writer block: unchanged
 
-            # learning updates after the episode (you can also do them online per step if you prefer)
+            # learning updates after the episode
             updates = int(max(1, args.updates_per_step * stats.moves))
             for _ in range(updates):
                 if len(buffer) < max(args.warmup, args.batch_size):
