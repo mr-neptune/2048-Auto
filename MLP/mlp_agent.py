@@ -147,10 +147,13 @@ class DQNAgent:
 
             loss = self.loss_fn(target, q_sa)
 
-        grads = tape.gradient(loss, self.q.trainable_variables)
+        train_vars = self.q.trainable_variables
+        grads = tape.gradient(loss, train_vars)
         if self.clip_norm and self.clip_norm > 0:
             grads, _ = tf.clip_by_global_norm(grads, self.clip_norm)
-        self.opt.apply_gradients(zip(grads, self.q.trainable_variables))
+        grad_var_pairs = [(g, v) for g, v in zip(grads, train_vars) if g is not None]
+        if grad_var_pairs:
+            self.opt.apply_gradients(grad_var_pairs)
         return loss
 
     def update(self, batch):
@@ -173,7 +176,7 @@ class DQNAgent:
         self.step_count += 1
         if self.step_count % self.target_sync == 0:
             self.tgt.set_weights(self.q.get_weights())
-        return float(loss.numpy())
+        return float(tf.keras.backend.get_value(loss))
 
     def decay_epsilon(self):
         self.eps = max(self.eps_end, self.eps * self.eps_decay)
@@ -268,7 +271,7 @@ def evaluate_agent(agent: DQNAgent, env: Game2048, episodes: int) -> EpisodeStat
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--episodes", type=int, default=2000, help="Number of training episodes")
-    parser.add_argument("--alpha", type=float, default=0.1, help="Learning rate for Q-updates")
+    # parser.add_argument("--alpha", type=float, default=0.1, help="Learning rate for Q-updates")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     parser.add_argument("--epsilon", type=float, default=1.0, help="Initial exploration rate")
     parser.add_argument("--epsilon-decay", type=float, default=0.995, help="Multiplicative epsilon decay")
@@ -276,8 +279,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-penalty", type=float, default=0.0, help="Optional penalty applied to every step")
     parser.add_argument("--log-interval", type=int, default=100, help="Episodes between log outputs")
     parser.add_argument("--eval-episodes", type=int, default=20, help="Number of greedy evaluation runs after training")
-    parser.add_argument("--save-path", type=str, default="bin/q_table.pkl", help="Path to store the trained Q-table")
-    parser.add_argument("--load-path", type=str, default="", help="Optional path to an existing Q-table to continue training")
+    # parser.add_argument("--save-path", type=str, default="bin/q_table.pkl", help="Path to store the trained Q-table")
+    # parser.add_argument("--load-path", type=str, default="", help="Optional path to an existing Q-table to continue training")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument(
         "--metrics-path",
