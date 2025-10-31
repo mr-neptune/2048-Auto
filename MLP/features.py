@@ -13,7 +13,7 @@ import numpy as np
 def log2_grid(board: np.ndarray) -> np.ndarray:
     """
     Return int log2 grid with empty->0.
-    Example: 0->0, 2->1, 4->2, ..., 2048->11
+    Example: 0->-1, 2->0, 4->1, ..., 2048->10
     """
     b = board.copy()
     b[b == 0] = 1
