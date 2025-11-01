@@ -21,7 +21,11 @@ from statistics import mean
 from typing import Deque, List, Sequence, Tuple
 
 from game2048 import Game2048
-from features import encode_state_with_features, shaping_reward
+
+try:
+    from .features import encode_state_with_features, shaping_reward
+except ImportError:  # pragma: no cover - fallback when running as a script
+    from features import encode_state_with_features, shaping_reward
 
 
 Action = int
@@ -443,6 +447,11 @@ def main() -> None:
         for episode in range(1, args.episodes + 1):
             stats = run_episode(agent, env, train=True, step_penalty=args.step_penalty, buffer=buffer)
             recent_stats.append(stats)
+
+            print(
+                f"Episode {episode:>5} | score={stats.score:6d} | reward={stats.reward:8.2f} | "
+                f"moves={stats.moves:4d} | max_tile={stats.max_tile:5d}"
+            )
 
             if metrics_writer:
                 metrics_writer.writerow(
