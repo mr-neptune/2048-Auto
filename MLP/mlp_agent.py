@@ -94,11 +94,11 @@ class DQNAgent:
         n_actions: int = 4,
         hidden: int = 256,       # MLP width (256 -> 256)
         gamma: float = 0.99,
-        lr: float = 1e-3,
+        lr: float = 1e-4,
         eps_start: float = 1.0,
-        eps_end: float = 0.05,
-        eps_decay: float = 0.995,
-        target_sync: int = 2000, # steps between target hard updates
+        eps_end: float = 0.20,
+        eps_decay: float = 0.997,
+        target_sync: int = 1_000, # steps between target hard updates
         clip_norm: float = 1.0,  # global grad norm clipping
         device: str = "/CPU:0",  # e.g., "/GPU:0"
         seed: int = 42,
@@ -229,6 +229,8 @@ def run_episode(
     step_penalty: float,
     buffer=None,           # ReplayBuffer | None
     use_shaping: bool = True,
+    reward_scale: float = 0.01,
+    reward_clip: float | None = None,
 ) -> EpisodeStats:
     """
     Plays one episode. Uses engineered features for state vectors,
@@ -255,8 +257,12 @@ def run_episode(
         prev_score = env.score
         board, score, done = env.step(action)
 
-        # base reward: score delta + step penalty
-        reward = float(score - prev_score) + step_penalty
+        # base reward: score delta + step penalty, with scaling and optional clip
+        raw_delta = float(score - prev_score)
+        reward = reward_scale * raw_delta + step_penalty
+
+        if reward_clip and reward_clip > 0:
+            reward = max(-reward_clip, min(reward_clip, reward))
 
         # optional small heuristic shaping (kept small to not dominate score)
         next_avail = env.get_available_actions()
@@ -283,7 +289,14 @@ def run_episode(
 
     return EpisodeStats(reward=total_reward, score=int(env.score), moves=moves, max_tile=max_tile)
 
-def evaluate_agent(agent: DQNAgent, env: Game2048, episodes: int) -> EpisodeStats:
+def evaluate_agent(
+    agent: DQNAgent,
+    env: Game2048,
+    episodes: int,
+    *,
+    reward_scale: float,
+    reward_clip: float | None,
+) -> EpisodeStats:
     scores: List[int] = []
     rewards: List[float] = []
     moves: List[int] = []
@@ -293,7 +306,16 @@ def evaluate_agent(agent: DQNAgent, env: Game2048, episodes: int) -> EpisodeStat
     agent.eps = 0.0
     try:
         for _ in range(episodes):
-            stats = run_episode(agent, env, train=False, step_penalty=0.0, buffer=None)
+            stats = run_episode(
+                agent,
+                env,
+                train=False,
+                step_penalty=0.0,
+                buffer=None,
+                use_shaping=False,
+                reward_scale=reward_scale,
+                reward_clip=reward_clip,
+            )
             scores.append(stats.score)
             rewards.append(stats.reward)
             moves.append(stats.moves)
@@ -365,9 +387,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=2000, help="Number of training episodes")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     parser.add_argument("--epsilon", type=float, default=1.0, help="Initial exploration rate")
-    parser.add_argument("--epsilon-decay", type=float, default=0.995, help="Multiplicative epsilon decay")
-    parser.add_argument("--epsilon-min", type=float, default=0.05, help="Minimum exploration rate")
+    parser.add_argument("--epsilon-decay", type=float, default=0.997, help="Multiplicative epsilon decay")
+    parser.add_argument("--epsilon-min", type=float, default=0.20, help="Minimum exploration rate")
     parser.add_argument("--step-penalty", type=float, default=0.0, help="Optional penalty applied to every step")
+    parser.add_argument("--reward-scale", type=float, default=0.01, help="Multiplicative scale applied to score delta rewards")
+    parser.add_argument("--reward-clip", type=float, default=0.0, help="Optional absolute clip on scaled rewards; 0 disables clipping")
     parser.add_argument("--log-interval", type=int, default=100, help="Episodes between log outputs")
     parser.add_argument("--eval-episodes", type=int, default=20, help="Number of greedy evaluation runs after training")
     parser.add_argument("--save-path", type=str, default="", help="Optional path to store a checkpoint after training")
@@ -384,18 +408,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Append to an existing metrics file instead of overwriting it",
     )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Adam learning rate for DQN")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate for DQN")
     parser.add_argument("--buffer-size", type=int, default=200_000, help="Replay buffer capacity")
     parser.add_argument("--batch-size", type=int, default=512, help="Replay batch size")
     parser.add_argument("--warmup", type=int, default=5_000, help="Min transitions before learning")
-    parser.add_argument("--target-sync", type=int, default=2_000, help="Steps between target net syncs")
-    parser.add_argument("--updates-per-step", type=float, default=1.0, help="Gradient updates per env step")
+    parser.add_argument("--target-sync", type=int, default=1_000, help="Steps between target net syncs")
+    parser.add_argument("--updates-per-step", type=float, default=0.25, help="Gradient updates per env step")
     parser.add_argument("--device", type=str, default="/CPU:0", help="TF device, e.g., /GPU:0")
     parser.add_argument(
         "--weights-csv",
         type=str,
         default="",
         help="Optional path to export the learned Q-network weights as a CSV",
+    )
+    parser.add_argument(
+        "--use-shaping",
+        action="store_true",
+        help="Enable heuristic reward shaping during training episodes",
     )
     return parser.parse_args()
 
@@ -435,6 +464,10 @@ def main() -> None:
         if replay_state:
             buffer.load_state(replay_state)
         print(f"Loaded checkpoint from '{args.load_path}'")
+        resume_eps = max(0.3, args.epsilon_min)
+        if agent.eps < resume_eps:
+            agent.eps = resume_eps
+            print(f"Reset epsilon to {agent.eps:.3f} for resumed training")
 
     metrics_writer = None
     metrics_file = None
@@ -445,7 +478,16 @@ def main() -> None:
 
     try:
         for episode in range(1, args.episodes + 1):
-            stats = run_episode(agent, env, train=True, step_penalty=args.step_penalty, buffer=buffer)
+            stats = run_episode(
+                agent,
+                env,
+                train=True,
+                step_penalty=args.step_penalty,
+                buffer=buffer,
+                use_shaping=args.use_shaping,
+                reward_scale=args.reward_scale,
+                reward_clip=args.reward_clip if args.reward_clip > 0 else None,
+            )
             recent_stats.append(stats)
 
             print(
@@ -477,7 +519,13 @@ def main() -> None:
                     f"best tile={best_tile:4d} | epsilon={agent.eps:.3f}"
                 )
         if args.eval_episodes > 0:
-            eval_stats = evaluate_agent(agent, env, episodes=args.eval_episodes)
+            eval_stats = evaluate_agent(
+                agent,
+                env,
+                episodes=args.eval_episodes,
+                reward_scale=args.reward_scale,
+                reward_clip=args.reward_clip if args.reward_clip > 0 else None,
+            )
             print(
                 f"[Evaluation] avg score={eval_stats.score:.1f} | "
                 f"avg reward={eval_stats.reward:.1f} | "
