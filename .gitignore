@@ -1,2 +1,22 @@
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+bin/
+pyvenv.cfg
+
+# Logs, checkpoints, and run outputs
+logs/
+CNN/logs/
+*.log
+*.chkpt
+CNN/logs/*.csv
+
+# OS-generated files
+.DS_Store

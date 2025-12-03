@@ -581,13 +581,30 @@ function startAutoPlay() {
         clearTimeout(autoPlayTimer);
     }
 
-    autoPlayActive = true;
-    if (autoPlayButton) {
-        autoPlayButton.classList.add('is-active');
-        autoPlayButton.textContent = 'Stop Auto Play';
+    const startLoop = () => {
+        autoPlayActive = true;
+        if (autoPlayButton) {
+            autoPlayButton.classList.add('is-active');
+            autoPlayButton.textContent = 'Stop Auto Play';
+        }
+        setControlStatus('Auto play started.', 'success');
+        runAutoPlayStep();
+    };
+
+    if (method === 'cnn') {
+        setControlStatus('Loading CNN agent and starting a new game...', 'info');
+        initializeCnnEval()
+            .then(() => {
+                startLoop();
+            })
+            .catch((error) => {
+                console.error(error);
+                stopAutoPlay('CNN agent is unavailable. Check the checkpoint path.', 'warning');
+            });
+        return;
     }
-    setControlStatus('Auto play started.', 'success');
-    runAutoPlayStep();
+
+    startLoop();
 }
 
 function stopAutoPlay(message = null, statusType = 'info') {
@@ -619,6 +636,11 @@ function runAutoPlayStep() {
     }
 
     const method = getSelectedMethod();
+    if (method === 'cnn') {
+        requestCnnMove();
+        return;
+    }
+
     const action = selectActionForMethod(method);
 
     if (action === null) {
@@ -653,11 +675,59 @@ function selectActionForMethod(method) {
     switch (method) {
         case 'random':
             return Math.floor(Math.random() * 4);
+        case 'cnn':
+            return null;
         case 'algorithm':
         case 'smart':
         default:
             return null;
     }
+}
+
+function initializeCnnEval() {
+    return fetch('/agent/init', {
+        method: 'POST',
+    })
+        .then((response) => response.json())
+        .then((data) => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            lastAction = null;
+            updateBoard(data.board, data.score, data.game_over);
+        });
+}
+
+function requestCnnMove() {
+    isWaitingForResponse = true;
+    fetch('/agent/move', {
+        method: 'POST',
+    })
+        .then((response) => response.json())
+        .then((data) => {
+            isWaitingForResponse = false;
+
+            if (data.error) {
+                stopAutoPlay(data.error, 'warning');
+                return;
+            }
+
+            lastAction = data.action;
+            updateBoard(data.board, data.score, data.game_over);
+
+            if (data.game_over) {
+                stopAutoPlay('Game over! Auto play stopped.', 'info');
+                return;
+            }
+
+            const delay = getSelectedSpeedDelay();
+            autoPlayTimer = setTimeout(runAutoPlayStep, delay);
+        })
+        .catch((error) => {
+            console.error('Error:', error);
+            isWaitingForResponse = false;
+            stopAutoPlay('CNN agent could not be reached. Auto play stopped.', 'warning');
+        });
 }
 
 function setControlStatus(message, type = '') {
