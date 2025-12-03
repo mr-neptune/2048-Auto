@@ -8,10 +8,10 @@ CNN DQN agent for 2048 with:
  - Double DQN with illegal-action masking
  - N-step returns (n=3 by default)
  - Symmetry augmentation by random rotations (action remapping)
- - PER-lite sampling (bias toward positive-reward transitions)
+ - Prioritized Experience Replay sampling (bias toward positive-reward transitions)
  - Reward scaling/optional clipping; Huber loss; grad clipping; target sync
 
-Assumes Game2048 API:
+Game2048 module:
   env = Game2048()
   env.board -> np.ndarray shape (4,4) with integers (0 or powers of two)
   env.score -> int
@@ -38,8 +38,8 @@ from tensorflow.keras import layers
 
 from game2048 import Game2048
 
-# --------------------------- Encoding & Augmentation ---------------------------
 
+# --------------------------- Encoding & Augmentation ---------------------------
 N_CHANNELS = 16  # empty + 2..2^15 (clamped)
 
 
@@ -79,8 +79,9 @@ def remap_action(a: int, k: int) -> int:
 def remap_actions(actions: Sequence[int], k: int) -> List[int]:
     return [remap_action(a, k) for a in actions]
 
-# ----------------------------- Replay & N-step -------------------------------
 
+
+# ----------------------------- Replay & N-step -------------------------------
 @dataclass
 class EpisodeStats:
     reward: float
@@ -178,8 +179,9 @@ class NStepBuilder:
         self._steps.clear()
         return out
 
-# ------------------------------ CNN Q-network -------------------------------
 
+
+# ------------------------------ CNN Q-network -------------------------------
 def conv_block_h(inp, channels: int):
     # Horizontal 1x2 then 1x2
     h1 = layers.Conv2D(channels, (1, 2), padding="valid", activation="relu")(inp)  # 4x3
@@ -228,8 +230,9 @@ def build_qnet_conv_dueling(channels: int = 128, n_actions: int = 4) -> keras.Mo
 
     return keras.Model(inp, out)
 
-# ------------------------------- DQN Agent ----------------------------------
 
+
+# ------------------------------- DQN Agent ----------------------------------
 class DQNAgent:
     def __init__(
         self,
@@ -265,18 +268,26 @@ class DQNAgent:
             self.opt = keras.optimizers.Adam(learning_rate=lr)
             self.loss_fn = keras.losses.Huber()
 
+
     def select_action(self, state_oh: np.ndarray, available_actions: Sequence[int], explore=True) -> int:
         if not available_actions:
             return 0
         if explore and random.random() < self.eps:
             return random.choice(list(available_actions))
+        
+        # get q values for each action
         q = self.q(np.expand_dims(state_oh, 0), training=False).numpy()[0]
+        # mask illegal actions with -inf
         masked = np.full_like(q, -np.inf, dtype=np.float32)
+
         for a in available_actions:
             masked[a] = q[a]
         best = float(np.max(masked))
+
+        # if multiple actions have similar values, we also consider them 'best'
         best_actions = [a for a in available_actions if masked[a] >= best - 1e-9]
         return random.choice(best_actions)
+
 
     @tf.function
     def _train_step(self, s, a, r, s2, d, next_mask, gamma_n):
@@ -395,12 +406,21 @@ def run_episode(
     s_oh = board_to_onehot(env.board)
 
     while True:
+        # detect if game is over
         avail = env.get_available_actions()
         if not avail:
             break
+
+        # select action or random action based on epsilon and network
         a = agent.select_action(s_oh, avail, explore=train)
 
+        # -------- Previous board information --------
         prev_score = env.score
+        empty_before = env.empty_cells()
+        max_before = env.max_tile()
+        corner_before = env.max_tile_in_corner()
+
+
         board, score, done = env.step(a)
 
         raw = float(score - prev_score)

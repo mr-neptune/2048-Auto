@@ -136,7 +136,29 @@ class Game2048:
         self.score = original_score
 
         return available_actions
+    
+    def empty_cells(self):
+        empty = 0
+        for row in self.board:
+            for num in row:
+                if num == 0:
+                    empty += 1
+        return empty
 
+    def max_tile(self) -> int:
+        return int(self.board.max())
+
+    def max_tile_in_corner(self) -> int:
+        """
+        Return 1 if the largest tile is in any corner, else 0, convenient for reward shaping
+        """
+        max_val = self.board.max()
+        corners = [self.board[0, 0],
+                   self.board[0, self.size - 1],
+                   self.board[self.size - 1, 0],
+                   self.board[self.size - 1, self.size - 1]]
+        return 1 if max_val in corners else 0
+    
     def step(self, action):
         """Apply an action to the game board (0: up, 1: right, 2: down, 3: left)."""
         board_changed = False
