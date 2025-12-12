@@ -420,17 +420,40 @@ def run_episode(
         max_before = env.max_tile()
         corner_before = env.max_tile_in_corner()
 
-
+        # apply action
         board, score, done = env.step(a)
 
-        raw = float(score - prev_score)
-        r = reward_scale * raw + step_penalty
+        # -------- After-move information --------
+        empty_after = env.empty_cells()
+        max_after = env.max_tile()
+
+        # -------- calculate reward --------
+        # 1) raw score
+        raw_delta = float(score - prev_score)
+        r = reward_scale * raw_delta - step_penalty
+
+        # 2) number of merges
+        merges = max(0.0, float(empty_after - empty_before + 1))
+        r += 0.2 * merges
+
+        # 3) next max
+        if max_after > max_before and max_before >= 2:
+            delta_log = math.log2(max_after) - math.log2(max_before)
+            if delta_log > 0:
+                r += 0.1 * delta_log
+
+        # 4) max tile in corner or not
+        corner_after = env.max_tile_in_corner()
+        delta_corner = float(corner_after - corner_before)
+        r += 0.2 * delta_corner
+
+        # 5) optional reward clipping
         if reward_clip and reward_clip > 0:
             r = float(np.clip(r, -reward_clip, reward_clip))
 
         total_reward += r
         moves += 1
-        max_tile = max(max_tile, int(board.max()))
+        max_tile = max(max_tile, max_after)
 
         s2_oh = board_to_onehot(board)
         next_avail = env.get_available_actions()
