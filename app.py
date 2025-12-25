@@ -11,7 +11,7 @@ app = Flask(__name__)
 game = Game2048()  # Initialize game here
 
 # ------------------------- CNN agent (pure eval) -------------------------
-CNN_CKPT_PATH = os.environ.get("CNN_CKPT_PATH", "bin/cnn_v3_03.chkpt")
+CNN_CKPT_PATH = os.environ.get("CNN_CKPT_PATH", "bin/cnn_v3_04.chkpt")
 CNN_CHANNELS = int(os.environ.get("CNN_CHANNELS", "128"))
 CNN_DEVICE = os.environ.get("CNN_DEVICE", "/CPU:0")
 
