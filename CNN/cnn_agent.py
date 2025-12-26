@@ -37,6 +37,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 from game2048 import Game2048
+from db import postgres as db
 
 
 # --------------------------- Encoding & Augmentation ---------------------------
@@ -483,6 +484,7 @@ def evaluate_agent(
     reward_clip: float | None,
     eval_writer=None,
     eval_file=None,
+    db_ctx=None,
 ) -> EpisodeStats:
     scores: List[int] = []
     rewards: List[float] = []
@@ -512,7 +514,17 @@ def evaluate_agent(
             if eval_writer is not None:
                 eval_writer.writerow([epi, stats.score, stats.reward, stats.moves, stats.max_tile, 0.0])
                 if eval_file is not None:
-                    eval_file.flush()             
+                    eval_file.flush()
+            db.log_metrics(
+                db_ctx,
+                phase="eval",
+                episode=epi,
+                score=stats.score,
+                reward=stats.reward,
+                moves=stats.moves,
+                max_tile=stats.max_tile,
+                epsilon=0.0,
+            )
     finally:
         agent.eps = eps0
 
@@ -618,6 +630,9 @@ def parse_args() -> argparse.Namespace:
         help="Append to an existing eval metrics file instead of overwriting it",
     )
     p.add_argument("--weights-csv", type=str, default="")
+    p.add_argument("--db-url", type=str, default="", help="Postgres URL; defaults to POSTGRES_URL/DATABASE_URL")
+    p.add_argument("--db-run-name", type=str, default="", help="Optional run name stored in Postgres")
+    p.add_argument("--db-notes", type=str, default="", help="Optional run notes stored in Postgres")
     return p.parse_args()
 
 # ---------------------------------- Main ------------------------------------
@@ -630,6 +645,16 @@ def main() -> None:
     tf.random.set_seed(args.seed)
 
     env = Game2048()
+
+    db_url = db.get_db_url(args.db_url)
+    run_params = {k: v for k, v in vars(args).items() if k not in ("db_url", "db_run_name", "db_notes")}
+    db_ctx = db.init_run(
+        db_url=db_url,
+        model_name="cnn_dqn",
+        run_name=args.db_run_name,
+        notes=args.db_notes,
+        params=run_params,
+    )
 
     agent = DQNAgent(
         n_actions=4,
@@ -681,6 +706,16 @@ def main() -> None:
                 metrics_writer.writerow([episode, stats.score, stats.reward, stats.moves, stats.max_tile, agent.eps])
                 if metrics_file:
                     metrics_file.flush()
+            db.log_metrics(
+                db_ctx,
+                phase="train",
+                episode=episode,
+                score=stats.score,
+                reward=stats.reward,
+                moves=stats.moves,
+                max_tile=stats.max_tile,
+                epsilon=agent.eps,
+            )
 
             # Learning updates after the episode
             updates = int(max(1, args.updates_per_step * stats.moves))
@@ -714,6 +749,7 @@ def main() -> None:
                 reward_clip=(args.reward_clip if args.reward_clip > 0 else None),
                 eval_writer=eval_writer,
                 eval_file=eval_file,
+                db_ctx=db_ctx,
             )
             if eval_file:
                 eval_file.close()
@@ -725,6 +761,7 @@ def main() -> None:
     finally:
         if metrics_file:
             metrics_file.close()
+        db.close(db_ctx)
         if args.save_path:
             save_checkpoint(args.save_path, agent, buffer)
             print(f"Saved checkpoint to '{args.save_path}'")
