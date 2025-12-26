@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pg_2048
+    environment:
+      POSTGRES_USER: 2048_user
+      POSTGRES_PASSWORD: 2048_pass
+      POSTGRES_DB: 2048_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
