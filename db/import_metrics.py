@@ -5,7 +5,14 @@ import csv
 from pathlib import Path
 from typing import Iterable
 
-from db import postgres as db
+try:
+    from db import postgres as db
+except ImportError:  # pragma: no cover - fallback for running as a script
+    import sys
+    from pathlib import Path as _Path
+
+    sys.path.append(str(_Path(__file__).resolve().parents[1]))
+    from db import postgres as db
 
 
 def parse_args() -> argparse.Namespace:
