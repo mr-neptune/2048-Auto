@@ -590,11 +590,11 @@ def export_model_weights_csv(model: keras.Model, path: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--episodes", type=int, default=2000)
-    p.add_argument("--gamma", type=float, default=0.99)
-    p.add_argument("--epsilon", type=float, default=1.0)
-    p.add_argument("--epsilon-decay", type=float, default=0.998)
+    p.add_argument("--gamma", type=float, default=0.9)
+    p.add_argument("--epsilon", type=float, default=0.9)
+    p.add_argument("--epsilon-decay", type=float, default=0.9999)
     p.add_argument("--epsilon-min", type=float, default=0.05)
-    p.add_argument("--step-penalty", type=float, default=0.0)
+    p.add_argument("--step-penalty", type=float, default=0.005)
     p.add_argument("--reward-scale", type=float, default=0.01)
     p.add_argument("--reward-clip", type=float, default=0.0)
     p.add_argument("--log-interval", type=int, default=100)
@@ -603,8 +603,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--load-path", type=str, default="")
     p.add_argument("--seed", type=int, default=42)
 
-    p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--buffer-size", type=int, default=200_000)
+    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--buffer-size", type=int, default=50_000)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--warmup", type=int, default=5_000)
     p.add_argument("--target-sync", type=int, default=1_000)
@@ -614,7 +614,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--channels", type=int, default=128, help="Conv channels per layer")
     p.add_argument("--aug-rot-prob", type=float, default=0.5, help="Prob. of applying a random 90deg rotation to each sample in a batch")
     p.add_argument("--n-step", type=int, default=3, help="N for n-step returns (built offline per episode)")
-    p.add_argument("--per-pos-frac", type=float, default=0.5, help="Fraction of batch drawn from positive-reward transitions")
+    p.add_argument("--per-pos-frac", type=float, default=0.3, help="Fraction of batch drawn from positive-reward transitions")
 
     p.add_argument("--metrics-path", type=str, default="")
     p.add_argument("--metrics-append", action="store_true")
@@ -678,10 +678,6 @@ def main() -> None:
         if replay_state:
             buffer.load_state(replay_state)
         print(f"Loaded checkpoint from '{args.load_path}'")
-        # ensure we don't resume with a tiny epsilon
-        if agent.eps < max(0.3, args.epsilon_min):
-            agent.eps = max(0.3, args.epsilon_min)
-            print(f"Reset epsilon to {agent.eps:.3f} for resumed training")
 
     metrics_writer, metrics_file = prepare_metrics_writer(args.metrics_path, args.metrics_append)
 
