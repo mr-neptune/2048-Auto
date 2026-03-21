@@ -37,6 +37,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 from game2048 import Game2048
+from db import postgres as db
 
 
 # --------------------------- Encoding & Augmentation ---------------------------
@@ -420,17 +421,40 @@ def run_episode(
         max_before = env.max_tile()
         corner_before = env.max_tile_in_corner()
 
-
+        # apply action
         board, score, done = env.step(a)
 
-        raw = float(score - prev_score)
-        r = reward_scale * raw + step_penalty
+        # -------- After-move information --------
+        empty_after = env.empty_cells()
+        max_after = env.max_tile()
+
+        # -------- calculate reward --------
+        # 1) raw score
+        raw_delta = float(score - prev_score)
+        r = reward_scale * raw_delta - step_penalty
+
+        # 2) number of merges
+        merges = max(0.0, float(empty_after - empty_before + 1))
+        r += 0.2 * merges
+
+        # 3) next max
+        if max_after > max_before and max_before >= 2:
+            delta_log = math.log2(max_after) - math.log2(max_before)
+            if delta_log > 0:
+                r += 0.1 * delta_log
+
+        # 4) max tile in corner or not
+        corner_after = env.max_tile_in_corner()
+        delta_corner = float(corner_after - corner_before)
+        r += 0.2 * delta_corner
+
+        # 5) optional reward clipping
         if reward_clip and reward_clip > 0:
             r = float(np.clip(r, -reward_clip, reward_clip))
 
         total_reward += r
         moves += 1
-        max_tile = max(max_tile, int(board.max()))
+        max_tile = max(max_tile, max_after)
 
         s2_oh = board_to_onehot(board)
         next_avail = env.get_available_actions()
@@ -460,6 +484,7 @@ def evaluate_agent(
     reward_clip: float | None,
     eval_writer=None,
     eval_file=None,
+    db_ctx=None,
 ) -> EpisodeStats:
     scores: List[int] = []
     rewards: List[float] = []
@@ -489,7 +514,17 @@ def evaluate_agent(
             if eval_writer is not None:
                 eval_writer.writerow([epi, stats.score, stats.reward, stats.moves, stats.max_tile, 0.0])
                 if eval_file is not None:
-                    eval_file.flush()             
+                    eval_file.flush()
+            db.log_metrics(
+                db_ctx,
+                phase="eval",
+                episode=epi,
+                score=stats.score,
+                reward=stats.reward,
+                moves=stats.moves,
+                max_tile=stats.max_tile,
+                epsilon=0.0,
+            )
     finally:
         agent.eps = eps0
 
@@ -555,11 +590,12 @@ def export_model_weights_csv(model: keras.Model, path: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--episodes", type=int, default=2000)
-    p.add_argument("--gamma", type=float, default=0.99)
-    p.add_argument("--epsilon", type=float, default=1.0)
-    p.add_argument("--epsilon-decay", type=float, default=0.998)
+    p.add_argument("--checkpoint-interval", type=int, default=200, help="Save checkpoint every N episodes (0 to disable)")
+    p.add_argument("--gamma", type=float, default=0.9)
+    p.add_argument("--epsilon", type=float, default=0.9)
+    p.add_argument("--epsilon-decay", type=float, default=0.9999)
     p.add_argument("--epsilon-min", type=float, default=0.05)
-    p.add_argument("--step-penalty", type=float, default=0.0)
+    p.add_argument("--step-penalty", type=float, default=0.005)
     p.add_argument("--reward-scale", type=float, default=0.01)
     p.add_argument("--reward-clip", type=float, default=0.0)
     p.add_argument("--log-interval", type=int, default=100)
@@ -568,18 +604,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--load-path", type=str, default="")
     p.add_argument("--seed", type=int, default=42)
 
-    p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--buffer-size", type=int, default=200_000)
+    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--buffer-size", type=int, default=50_000)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--warmup", type=int, default=5_000)
     p.add_argument("--target-sync", type=int, default=1_000)
     p.add_argument("--updates-per-step", type=float, default=0.5)
-    p.add_argument("--device", type=str, default="/CPU:0")
+    p.add_argument("--device", type=str, default="/GPU:0")
 
     p.add_argument("--channels", type=int, default=128, help="Conv channels per layer")
     p.add_argument("--aug-rot-prob", type=float, default=0.5, help="Prob. of applying a random 90deg rotation to each sample in a batch")
     p.add_argument("--n-step", type=int, default=3, help="N for n-step returns (built offline per episode)")
-    p.add_argument("--per-pos-frac", type=float, default=0.5, help="Fraction of batch drawn from positive-reward transitions")
+    p.add_argument("--per-pos-frac", type=float, default=0.3, help="Fraction of batch drawn from positive-reward transitions")
 
     p.add_argument("--metrics-path", type=str, default="")
     p.add_argument("--metrics-append", action="store_true")
@@ -595,6 +631,9 @@ def parse_args() -> argparse.Namespace:
         help="Append to an existing eval metrics file instead of overwriting it",
     )
     p.add_argument("--weights-csv", type=str, default="")
+    p.add_argument("--db-url", type=str, default="", help="Postgres URL; defaults to POSTGRES_URL/DATABASE_URL")
+    p.add_argument("--db-run-name", type=str, default="", help="Optional run name stored in Postgres")
+    p.add_argument("--db-notes", type=str, default="", help="Optional run notes stored in Postgres")
     return p.parse_args()
 
 # ---------------------------------- Main ------------------------------------
@@ -607,6 +646,16 @@ def main() -> None:
     tf.random.set_seed(args.seed)
 
     env = Game2048()
+
+    db_url = db.get_db_url(args.db_url)
+    run_params = {k: v for k, v in vars(args).items() if k not in ("db_url", "db_run_name", "db_notes")}
+    db_ctx = db.init_run(
+        db_url=db_url,
+        model_name="cnn_dqn",
+        run_name=args.db_run_name,
+        notes=args.db_notes,
+        params=run_params,
+    )
 
     agent = DQNAgent(
         n_actions=4,
@@ -630,10 +679,6 @@ def main() -> None:
         if replay_state:
             buffer.load_state(replay_state)
         print(f"Loaded checkpoint from '{args.load_path}'")
-        # ensure we don't resume with a tiny epsilon
-        if agent.eps < max(0.3, args.epsilon_min):
-            agent.eps = max(0.3, args.epsilon_min)
-            print(f"Reset epsilon to {agent.eps:.3f} for resumed training")
 
     metrics_writer, metrics_file = prepare_metrics_writer(args.metrics_path, args.metrics_append)
 
@@ -658,6 +703,16 @@ def main() -> None:
                 metrics_writer.writerow([episode, stats.score, stats.reward, stats.moves, stats.max_tile, agent.eps])
                 if metrics_file:
                     metrics_file.flush()
+            db.log_metrics(
+                db_ctx,
+                phase="train",
+                episode=episode,
+                score=stats.score,
+                reward=stats.reward,
+                moves=stats.moves,
+                max_tile=stats.max_tile,
+                epsilon=agent.eps,
+            )
 
             # Learning updates after the episode
             updates = int(max(1, args.updates_per_step * stats.moves))
@@ -681,6 +736,10 @@ def main() -> None:
                     f"best tile={best_tile:4d} | epsilon={agent.eps:.3f}"
                 )
 
+            if args.checkpoint_interval > 0 and episode % args.checkpoint_interval == 0 and args.save_path:
+                save_checkpoint(args.save_path, agent, buffer)
+                print(f"[Checkpoint] Saved at episode {episode} to '{args.save_path}'")
+
         if args.eval_episodes > 0:
             eval_writer, eval_file = prepare_metrics_writer(args.eval_metrics_path, args.eval_metrics_append) if args.eval_metrics_path else (None, None)
             eval_stats = evaluate_agent(
@@ -691,6 +750,7 @@ def main() -> None:
                 reward_clip=(args.reward_clip if args.reward_clip > 0 else None),
                 eval_writer=eval_writer,
                 eval_file=eval_file,
+                db_ctx=db_ctx,
             )
             if eval_file:
                 eval_file.close()
@@ -702,6 +762,7 @@ def main() -> None:
     finally:
         if metrics_file:
             metrics_file.close()
+        db.close(db_ctx)
         if args.save_path:
             save_checkpoint(args.save_path, agent, buffer)
             print(f"Saved checkpoint to '{args.save_path}'")

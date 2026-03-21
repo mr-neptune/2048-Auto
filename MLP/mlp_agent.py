@@ -21,6 +21,7 @@ from statistics import mean
 from typing import Deque, List, Sequence, Tuple
 
 from game2048 import Game2048
+from db import postgres as db
 
 try:
     from .features import encode_state_with_features, shaping_reward
@@ -296,6 +297,7 @@ def evaluate_agent(
     *,
     reward_scale: float,
     reward_clip: float | None,
+    db_ctx=None,
 ) -> EpisodeStats:
     scores: List[int] = []
     rewards: List[float] = []
@@ -305,7 +307,7 @@ def evaluate_agent(
     original_eps = agent.eps
     agent.eps = 0.0
     try:
-        for _ in range(episodes):
+        for epi in range(1, episodes + 1):
             stats = run_episode(
                 agent,
                 env,
@@ -320,6 +322,16 @@ def evaluate_agent(
             rewards.append(stats.reward)
             moves.append(stats.moves)
             max_tiles.append(stats.max_tile)
+            db.log_metrics(
+                db_ctx,
+                phase="eval",
+                episode=epi,
+                score=stats.score,
+                reward=stats.reward,
+                moves=stats.moves,
+                max_tile=stats.max_tile,
+                epsilon=0.0,
+            )
     finally:
         agent.eps = original_eps
 
@@ -426,6 +438,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable heuristic reward shaping during training episodes",
     )
+    parser.add_argument("--db-url", type=str, default="", help="Postgres URL; defaults to POSTGRES_URL/DATABASE_URL")
+    parser.add_argument("--db-run-name", type=str, default="", help="Optional run name stored in Postgres")
+    parser.add_argument("--db-notes", type=str, default="", help="Optional run notes stored in Postgres")
     return parser.parse_args()
 
 def main() -> None:
@@ -436,6 +451,16 @@ def main() -> None:
     tf.random.set_seed(args.seed)
 
     env = Game2048()
+
+    db_url = db.get_db_url(args.db_url)
+    run_params = {k: v for k, v in vars(args).items() if k not in ("db_url", "db_run_name", "db_notes")}
+    db_ctx = db.init_run(
+        db_url=db_url,
+        model_name="mlp_dqn",
+        run_name=args.db_run_name,
+        notes=args.db_notes,
+        params=run_params,
+    )
 
     # compute input_dim from your feature encoder
     init_avail = env.get_available_actions()
@@ -501,6 +526,16 @@ def main() -> None:
                 )
                 if metrics_file:
                     metrics_file.flush()
+            db.log_metrics(
+                db_ctx,
+                phase="train",
+                episode=episode,
+                score=stats.score,
+                reward=stats.reward,
+                moves=stats.moves,
+                max_tile=stats.max_tile,
+                epsilon=agent.eps,
+            )
 
             # learning updates after the episode
             updates = int(max(1, args.updates_per_step * stats.moves))
@@ -525,6 +560,7 @@ def main() -> None:
                 episodes=args.eval_episodes,
                 reward_scale=args.reward_scale,
                 reward_clip=args.reward_clip if args.reward_clip > 0 else None,
+                db_ctx=db_ctx,
             )
             print(
                 f"[Evaluation] avg score={eval_stats.score:.1f} | "
@@ -535,6 +571,7 @@ def main() -> None:
     finally:
         if metrics_file:
             metrics_file.close()
+        db.close(db_ctx)
         if args.save_path:
             save_checkpoint(args.save_path, agent, buffer)
             print(f"Saved checkpoint to '{args.save_path}'")

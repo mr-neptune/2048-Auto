@@ -23,3 +23,16 @@ Key options:
 - `--eval-episodes` – how many greedy runs to average for the evaluation summary.
 
 After training you can point the front-end’s auto-play logic to the resulting policy or use the saved table to bootstrap more advanced agents.
+
+## Optional Postgres metrics logging
+
+If you want to log per-episode metrics to Postgres (for visual inspection in tools like TablePlus), run Postgres with Docker and pass a connection URL to the training scripts.
+
+```bash
+docker compose up -d
+export POSTGRES_URL="postgresql://2048_user:2048_pass@localhost:5432/2048_db"
+python CNN/cnn_agent.py --episodes 1000 --db-run-name "cnn-run-1"
+python MLP/mlp_agent.py --episodes 1000 --db-run-name "mlp-run-1"
+```
+
+Schema reference lives at `db/schema.sql`.
