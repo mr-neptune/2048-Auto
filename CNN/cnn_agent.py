@@ -609,7 +609,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup", type=int, default=5_000)
     p.add_argument("--target-sync", type=int, default=1_000)
     p.add_argument("--updates-per-step", type=float, default=0.5)
-    p.add_argument("--device", type=str, default="/CPU:0")
+    p.add_argument("--device", type=str, default="/GPU:0")
 
     p.add_argument("--channels", type=int, default=128, help="Conv channels per layer")
     p.add_argument("--aug-rot-prob", type=float, default=0.5, help="Prob. of applying a random 90deg rotation to each sample in a batch")
