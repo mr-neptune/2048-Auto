@@ -590,6 +590,7 @@ def export_model_weights_csv(model: keras.Model, path: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--episodes", type=int, default=2000)
+    p.add_argument("--checkpoint-interval", type=int, default=200, help="Save checkpoint every N episodes (0 to disable)")
     p.add_argument("--gamma", type=float, default=0.9)
     p.add_argument("--epsilon", type=float, default=0.9)
     p.add_argument("--epsilon-decay", type=float, default=0.9999)
@@ -734,6 +735,10 @@ def main() -> None:
                     f"Episode {episode:>5}: avg score={avg_score:8.1f} | avg reward={avg_reward:8.1f} | "
                     f"best tile={best_tile:4d} | epsilon={agent.eps:.3f}"
                 )
+
+            if args.checkpoint_interval > 0 and episode % args.checkpoint_interval == 0 and args.save_path:
+                save_checkpoint(args.save_path, agent, buffer)
+                print(f"[Checkpoint] Saved at episode {episode} to '{args.save_path}'")
 
         if args.eval_episodes > 0:
             eval_writer, eval_file = prepare_metrics_writer(args.eval_metrics_path, args.eval_metrics_append) if args.eval_metrics_path else (None, None)
