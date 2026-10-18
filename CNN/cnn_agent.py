@@ -46,13 +46,11 @@ N_CHANNELS = 16  # empty + 2..2^15 (clamped)
 
 def board_to_onehot(board: np.ndarray, n_channels: int = N_CHANNELS) -> np.ndarray:
     """Return one-hot (4,4,16). ch 0=empty, ch k=2^k (clamped to 15)."""
-    onehot = np.zeros((4, 4, n_channels), dtype=np.float32)
-    for r in range(4):
-        for c in range(4):
-            v = int(board[r, c])
-            k = 0 if v == 0 else min(int(np.log2(v)), n_channels - 1)
-            onehot[r, c, k] = 1.0
-    return onehot
+    b = np.asarray(board)
+    k = np.zeros(b.shape, dtype=np.int64)
+    nz = b > 0
+    k[nz] = np.minimum(np.log2(b[nz]).astype(np.int64), n_channels - 1)
+    return np.eye(n_channels, dtype=np.float32)[k]
 
 # Action map to index according to game2048.py
 A_UP, A_RIGHT, A_DOWN, A_LEFT = 0, 1, 2, 3
