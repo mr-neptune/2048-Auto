@@ -590,6 +590,7 @@ def export_model_weights_csv(model: keras.Model, path: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--episodes", type=int, default=2000)
+    p.add_argument("--start-episode", type=int, default=1, help="Starting episode number for metrics logging (use when resuming)")
     p.add_argument("--checkpoint-interval", type=int, default=200, help="Save checkpoint every N episodes (0 to disable)")
     p.add_argument("--gamma", type=float, default=0.9)
     p.add_argument("--epsilon", type=float, default=0.9)
@@ -685,7 +686,7 @@ def main() -> None:
     recent: Deque[EpisodeStats] = deque(maxlen=args.log_interval)
 
     try:
-        for episode in range(1, args.episodes + 1):
+        for episode in range(args.start_episode, args.start_episode + args.episodes):
             stats = run_episode(
                 agent,
                 env,
