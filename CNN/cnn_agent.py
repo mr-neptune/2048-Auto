@@ -322,14 +322,19 @@ class DQNAgent:
             self.loss_fn = keras.losses.Huber()
 
 
+    @tf.function(input_signature=[tf.TensorSpec((None, 4, 4, N_CHANNELS), tf.float32)])
+    def _q_values(self, x):
+        # compiled forward pass; eager keras calls cost ~10ms each
+        return self.q(x, training=False)
+
     def select_action(self, state_oh: np.ndarray, available_actions: Sequence[int], explore=True) -> int:
         if not available_actions:
             return 0
         if explore and random.random() < self.eps:
             return random.choice(list(available_actions))
-        
+
         # get q values for each action
-        q = self.q(np.expand_dims(state_oh, 0), training=False).numpy()[0]
+        q = self._q_values(np.expand_dims(state_oh, 0).astype(np.float32)).numpy()[0]
         # mask illegal actions with -inf
         masked = np.full_like(q, -np.inf, dtype=np.float32)
 
