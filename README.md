@@ -4,6 +4,14 @@
 
 The game logic is implemented in Python 3, and the user interface is implemented in HTML, CSS, and JavaScript. A small Flask server (`app.py`) exposes HTTP endpoints so the same environment can drive both the browser UI and automated agents.
 
+## Demo
+
+<p align="center">
+  <img src="docs/images/demo_2048.gif" width="600" alt="The afterstate CNN agent auto-playing 2048 in the browser UI, finishing a game with a 2048 tile at 26,964 points">
+</p>
+
+The final moves of a game played by the afterstate CNN agent (episode-3000 checkpoint, no randomness): it builds a 2048 tile and ends at 26,964 points. To watch it yourself, run `python -m flask --app app run --port 5001`, open http://localhost:5001, pick **CNN Afterstate (new)**, and press **Start Auto Play**.
+
 ## Local training with Q-learning
 
 The repository now ships with a lightweight Q-learning trainer that plays directly against the Python environment. It collects experience, updates a tabular policy, and can optionally resume from a saved checkpoint.
