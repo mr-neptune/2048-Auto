@@ -79,6 +79,25 @@ def remap_actions(actions: Sequence[int], k: int) -> List[int]:
     return [remap_action(a, k) for a in actions]
 
 
+# ROT_TABLE[k, a] == ROT_ACTION[k][a], for vectorized remapping
+ROT_TABLE = np.array([[ROT_ACTION[k][a] for a in range(4)] for k in range(4)], dtype=np.int32)
+
+
+def augment_batch(s, a, s2, next_mask, ks):
+    """Rotate each sample i by ks[i]*90 degrees cw; remap actions and next-action masks."""
+    s_aug, s2_aug = s.copy(), s2.copy()
+    for k in (1, 2, 3):
+        idx = np.flatnonzero(ks == k)
+        if idx.size:
+            s_aug[idx] = np.rot90(s[idx], k=4 - k, axes=(1, 2))
+            s2_aug[idx] = np.rot90(s2[idx], k=4 - k, axes=(1, 2))
+    a_aug = ROT_TABLE[ks, a]
+    # remapped action ROT_TABLE[k, j] inherits the availability of original action j
+    mask_aug = np.zeros_like(next_mask)
+    mask_aug[np.arange(len(ks))[:, None], ROT_TABLE[ks]] = next_mask
+    return s_aug, a_aug, s2_aug, mask_aug
+
+
 
 # ----------------------------- Replay & N-step -------------------------------
 @dataclass
@@ -91,53 +110,88 @@ class EpisodeStats:
 
 class ReplayBuffer:
     """
-    Uniform buffer with PER-lite sampling toward positive rewards.
-    pos_frac: fraction of transitions with positive rewards.
+    Numpy ring buffer with PER-lite sampling toward positive rewards.
+    pos_frac: fraction of each batch drawn from positive-reward transitions;
+    the rest is drawn uniformly (with replacement) from the whole buffer.
+    States are stored as uint8 one-hot and returned as float32.
     """
-    def __init__(self, capacity: int, pos_frac: float = 0.5) -> None:
-        self.capacity = capacity
-        self.buf = deque(maxlen=capacity)
+    def __init__(self, capacity: int, pos_frac: float = 0.5, n_actions: int = 4) -> None:
         self.pos_frac = float(np.clip(pos_frac, 0.0, 1.0))
+        self.n_actions = n_actions
+        self._alloc(capacity)
+
+    def _alloc(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.s = np.zeros((capacity, 4, 4, N_CHANNELS), dtype=np.uint8)
+        self.a = np.zeros(capacity, dtype=np.int32)
+        self.r = np.zeros(capacity, dtype=np.float32)
+        self.s2 = np.zeros((capacity, 4, 4, N_CHANNELS), dtype=np.uint8)
+        self.d = np.zeros(capacity, dtype=np.bool_)
+        self.next_mask = np.zeros((capacity, self.n_actions), dtype=np.float32)
+        self.pos = 0  # next write index
+        self.size = 0
 
     def push(self, s, a, r, s2, done, next_avail) -> None:
-        self.buf.append((s, a, r, s2, done, tuple(next_avail)))
+        i = self.pos
+        self.s[i] = s
+        self.a[i] = a
+        self.r[i] = r
+        self.s2[i] = s2
+        self.d[i] = done
+        self.next_mask[i] = 0.0
+        if next_avail:
+            self.next_mask[i, list(next_avail)] = 1.0
+        self.pos = (i + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     def __len__(self) -> int:
-        return len(self.buf)
+        return self.size
 
     def sample(self, batch_size: int):
+        n = self.size
         if self.pos_frac <= 1e-6:
-            batch = random.sample(self.buf, batch_size)
+            idxs = np.random.randint(0, n, size=batch_size)
         else:
-            pos_idx = [i for i, (_, _, r, *_rest) in enumerate(self.buf) if r > 0]
+            pos_idx = np.flatnonzero(self.r[:n] > 0)
             k_pos = min(int(math.ceil(batch_size * self.pos_frac)), len(pos_idx))
-            pos_samples = random.sample(pos_idx, k_pos) if k_pos > 0 else []
-            remain = batch_size - len(pos_samples)
-            pool = [i for i in range(len(self.buf)) if i not in pos_samples]
-            others = random.sample(pool, remain)
-            idxs = pos_samples + others
-            random.shuffle(idxs)
-            batch = [self.buf[i] for i in idxs]
-        s, a, r, s2, d, next_avail = zip(*batch)
+            pos_samples = np.random.choice(pos_idx, k_pos, replace=False)
+            others = np.random.randint(0, n, size=batch_size - k_pos)
+            idxs = np.concatenate([pos_samples, others])
         return (
-            np.stack(s).astype(np.float32),
-            np.array(a, dtype=np.int32),
-            np.array(r, dtype=np.float32),
-            np.stack(s2).astype(np.float32),
-            np.array(d, dtype=np.bool_),
-            next_avail,
+            self.s[idxs].astype(np.float32),
+            self.a[idxs],
+            self.r[idxs],
+            self.s2[idxs].astype(np.float32),
+            self.d[idxs],
+            self.next_mask[idxs],
         )
 
     def state_dict(self):
-        return {"capacity": self.capacity, "data": list(self.buf), "pos_frac": self.pos_frac}
+        n = self.size
+        return {
+            "capacity": self.capacity,
+            "pos_frac": self.pos_frac,
+            "pos": self.pos,
+            "size": n,
+            "s": self.s[:n], "a": self.a[:n], "r": self.r[:n],
+            "s2": self.s2[:n], "d": self.d[:n], "next_mask": self.next_mask[:n],
+        }
 
     def load_state(self, state):
         if not state:
             return
-        self.capacity = int(state.get("capacity", self.capacity))
         self.pos_frac = float(state.get("pos_frac", self.pos_frac))
-        data = state.get("data", [])
-        self.buf = deque(data, maxlen=self.capacity)
+        self._alloc(int(state.get("capacity", self.capacity)))
+        if "data" in state:
+            # legacy deque checkpoint: list of (s, a, r, s2, done, next_avail), oldest first
+            for tr in state["data"][-self.capacity:]:
+                self.push(*tr)
+            return
+        n = min(int(state["size"]), self.capacity)
+        for key in ("s", "a", "r", "s2", "d", "next_mask"):
+            getattr(self, key)[:n] = state[key][:n]
+        self.size = n
+        self.pos = int(state["pos"]) % self.capacity
 
 
 class NStepBuilder:
@@ -316,26 +370,15 @@ class DQNAgent:
         return loss
 
     def update(self, batch, aug_rot_prob: float = 0.5, gamma_n: float | None = None):
-        s, a, r, s2, d, next_avail = batch
+        s, a, r, s2, d, next_mask = batch
         B = s.shape[0]
 
         # Optional symmetry augmentation via random rotations
         if aug_rot_prob > 0:
             ks = np.random.choice([0, 1, 2, 3], size=B, p=[1 - aug_rot_prob, aug_rot_prob/3, aug_rot_prob/3, aug_rot_prob/3])
-            s_aug = np.stack([rotate_state(s[i], int(ks[i])) for i in range(B)])
-            s2_aug = np.stack([rotate_state(s2[i], int(ks[i])) for i in range(B)])
-            a_aug = np.array([remap_action(a[i], int(ks[i])) for i in range(B)], dtype=np.int32)
-            next_mask = np.zeros((B, self.n_actions), dtype=np.float32)
-            for i in range(B):
-                avail = remap_actions(next_avail[i], int(ks[i]))
-                if avail:
-                    next_mask[i, list(avail)] = 1.0
+            s_aug, a_aug, s2_aug, next_mask = augment_batch(s, a, s2, next_mask, ks)
         else:
             s_aug, s2_aug, a_aug = s, s2, a
-            next_mask = np.zeros((B, self.n_actions), dtype=np.float32)
-            for i, avail in enumerate(next_avail):
-                if avail:
-                    next_mask[i, list(avail)] = 1.0
 
         gamma_eff = self.gamma if gamma_n is None else gamma_n
         loss = self._train_step(
