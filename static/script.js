@@ -8,6 +8,7 @@ const AUTO_PLAY_SPEEDS = {
 };
 const AUTO_PLAY_CHECK_INTERVAL = 60;
 const NOT_IMPLEMENTED_METHODS = new Set(['algorithm', 'smart']);
+const AGENT_METHODS = new Set(['cnn', 'afterstate']); // server-side agents; value is sent as `model`
 
 let tileContainer = null;
 let tilesState = new Map();
@@ -591,9 +592,9 @@ function startAutoPlay() {
         runAutoPlayStep();
     };
 
-    if (method === 'cnn') {
+    if (AGENT_METHODS.has(method)) {
         setControlStatus('Loading CNN agent and starting a new game...', 'info');
-        initializeCnnEval()
+        initializeCnnEval(method)
             .then(() => {
                 startLoop();
             })
@@ -636,8 +637,8 @@ function runAutoPlayStep() {
     }
 
     const method = getSelectedMethod();
-    if (method === 'cnn') {
-        requestCnnMove();
+    if (AGENT_METHODS.has(method)) {
+        requestCnnMove(method);
         return;
     }
 
@@ -684,9 +685,11 @@ function selectActionForMethod(method) {
     }
 }
 
-function initializeCnnEval() {
+function initializeCnnEval(model) {
     return fetch('/agent/init', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
     })
         .then((response) => response.json())
         .then((data) => {
@@ -698,10 +701,12 @@ function initializeCnnEval() {
         });
 }
 
-function requestCnnMove() {
+function requestCnnMove(model) {
     isWaitingForResponse = true;
     fetch('/agent/move', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
     })
         .then((response) => response.json())
         .then((data) => {

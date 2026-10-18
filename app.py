@@ -5,6 +5,7 @@ import numpy as np
 from flask import Flask, jsonify, request, render_template
 
 from CNN.cnn_agent import DQNAgent, board_to_onehot, load_checkpoint
+from CNN.cnn_afterstate import AfterstateAgent, legal_afterstates
 from game2048 import Game2048
 
 app = Flask(__name__)
@@ -46,6 +47,46 @@ def get_cnn_agent():
     _cnn_agent = agent
     return _cnn_agent
 
+
+# ------------------- CNN afterstate agent (pure eval) --------------------
+AFTERSTATE_CKPT_PATH = os.environ.get("AFTERSTATE_CKPT_PATH", "bin/cnn_after_pilot.chkpt")
+
+_afterstate_agent = None
+_afterstate_reward_scale = 1e-3
+
+
+def get_afterstate_agent():
+    """Lazily load the afterstate value agent; network shape comes from the checkpoint's args."""
+    global _afterstate_agent, _afterstate_reward_scale
+    if _afterstate_agent is not None:
+        return _afterstate_agent
+
+    ckpt_path = Path(AFTERSTATE_CKPT_PATH)
+    if not ckpt_path.exists():
+        return None
+
+    state = load_checkpoint(str(ckpt_path))
+    args = state.get("args", {})
+    agent = AfterstateAgent(
+        channels=args.get("channels", 128),
+        hidden=args.get("hidden", 256),
+        gamma=args.get("gamma", 1.0),
+    )
+    agent.load_state_dict(state.get("agent"))
+    _afterstate_reward_scale = args.get("reward_scale", 1e-3)
+    _afterstate_agent = agent
+    return _afterstate_agent
+
+
+def get_agent_for(model):
+    if model == "afterstate":
+        return get_afterstate_agent(), AFTERSTATE_CKPT_PATH
+    return get_cnn_agent(), CNN_CKPT_PATH
+
+
+def requested_model():
+    return (request.get_json(silent=True) or {}).get("model", "cnn")
+
 @app.route('/')
 def home():
     return render_template('index.html')  # This should be the path to your HTML file
@@ -70,28 +111,44 @@ def move():
 
 @app.route('/agent/init', methods=['POST'])
 def agent_init():
-    agent = get_cnn_agent()
+    agent, ckpt_path = get_agent_for(requested_model())
     if agent is None:
-        return jsonify(error=f"CNN checkpoint not found at '{CNN_CKPT_PATH}'."), 404
+        return jsonify(error=f"Checkpoint not found at '{ckpt_path}'."), 404
 
     game.reset()
     board = [[int(cell) for cell in row] for row in game.board.tolist()]
     return jsonify(board=board, score=int(game.score), game_over=False)
 
 
-@app.route('/agent/move', methods=['POST'])
-def agent_move():
-    agent = get_cnn_agent()
-    if agent is None:
-        return jsonify(error="CNN agent is not loaded."), 404
+def choose_afterstate_action(agent):
+    """Greedy afterstate move for the current board, or None when no move is legal."""
+    actions, afterstates, deltas = legal_afterstates(game)
+    if afterstates is None or deltas is None:
+        return None
+    i, _ = agent.select(afterstates, _afterstate_reward_scale * deltas)
+    return int(actions[i])
 
+
+def choose_dqn_action(agent):
+    """Greedy DQN move for the current board, or None when no move is legal."""
     available_actions = game.get_available_actions()
     if not available_actions:
+        return None
+    state = board_to_onehot(game.board)
+    return int(agent.select_action(state, available_actions, explore=False))
+
+
+@app.route('/agent/move', methods=['POST'])
+def agent_move():
+    model = requested_model()
+    agent, _ = get_agent_for(model)
+    if agent is None:
+        return jsonify(error="Agent is not loaded."), 404
+
+    action = choose_afterstate_action(agent) if model == "afterstate" else choose_dqn_action(agent)
+    if action is None:
         board = [[int(cell) for cell in row] for row in game.board.tolist()]
         return jsonify(board=board, score=int(game.score), game_over=True, action=None)
-
-    state = board_to_onehot(game.board)
-    action = int(agent.select_action(state, available_actions, explore=False))
 
     board, score, game_over = game.step(action)
     board_python = [[int(cell) for cell in row] for row in board.tolist()]
