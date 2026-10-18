@@ -349,20 +349,21 @@ class DQNAgent:
 
     @tf.function
     def _train_step(self, s, a, r, s2, d, next_mask, gamma_n):
+        # Double DQN target (no gradient flows through it, so build it outside the tape)
+        q_next_online = self.q(s2, training=False)
+        neg_inf = tf.constant(-1e9, dtype=q_next_online.dtype)
+        masked_next = q_next_online + (1.0 - next_mask) * neg_inf
+        next_act = tf.argmax(masked_next, axis=1, output_type=tf.int32)
+
+        q_next_target = self.tgt(s2, training=False)
+        q_next_target_sa = tf.gather(q_next_target, next_act, batch_dims=1)
+
+        not_done = tf.cast(tf.logical_not(d), tf.float32)
+        target = r + not_done * gamma_n * q_next_target_sa
+
         with tf.GradientTape() as tape:
             q_all = self.q(s, training=True)                # (B,4)
             q_sa = tf.gather(q_all, a, batch_dims=1)        # (B,)
-
-            q_next_online = self.q(s2, training=False)
-            neg_inf = tf.constant(-1e9, dtype=q_next_online.dtype)
-            masked_next = q_next_online + (1.0 - next_mask) * neg_inf
-            next_act = tf.argmax(masked_next, axis=1, output_type=tf.int32)
-
-            q_next_target = self.tgt(s2, training=False)
-            q_next_target_sa = tf.gather(q_next_target, next_act, batch_dims=1)
-
-            not_done = tf.cast(tf.logical_not(d), tf.float32)
-            target = r + not_done * gamma_n * q_next_target_sa
             loss = self.loss_fn(target, q_sa)
 
         vars = self.q.trainable_variables
