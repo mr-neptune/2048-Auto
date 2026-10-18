@@ -12,6 +12,92 @@ The game logic is implemented in Python 3, and the user interface is implemented
 
 The final moves of a game played by the afterstate CNN agent (episode-3000 checkpoint, no randomness): it builds a 2048 tile and ends at 26,964 points. To watch it yourself, run `python -m flask --app app run --port 5001`, open http://localhost:5001, pick **CNN Afterstate (new)**, and press **Start Auto Play**.
 
+## CNN afterstate agent
+
+`CNN/cnn_afterstate.py` is the current best agent. It replaced the earlier DQN (`CNN/cnn_agent.py`), which stalled at about 2.5K points after 20K episodes.
+
+**The idea.** A 2048 move has two parts: your slide, which is fully predictable, and a random new tile, which is luck. The DQN had to guess both at once. The afterstate agent slides the tiles itself (the rules are known), so it only asks the network one question: *how good is this board right after my slide, before the new tile appears?* That board is the **afterstate**.
+
+```mermaid
+flowchart LR
+    S["Current board"] --> A["Try all 4 slides<br/>(no new tile yet)"]
+    A --> N["CNN rates each<br/>afterstate: V"]
+    N --> P["Play the move with the highest<br/>points gained + V"]
+    P --> G["Game adds a random<br/>2 or 4 tile"]
+    G --> S
+```
+
+Training details:
+
+- **Reward is the real game score.** There are no hand-made bonus rewards.
+- **TD(λ) targets.** After each game, every afterstate is trained toward a mix of the points actually earned afterwards and the network's own estimate of later boards (λ = 0.5, no discount).
+- **8× data.** A board is equally good rotated or mirrored, so each training sample gets one of the 8 symmetries at random.
+- **No random exploration.** The random tile spawns already make every game different.
+- **Replay buffer** of 50K afterstates. Each afterstate is trained on about 8 times.
+
+### Results
+
+Greedy play (always the best move, no random moves). "Reached" means the game's largest tile was at least that tile.
+
+| Reached tile | Old DQN<br/>20K episodes | **Afterstate CNN**<br/>3K episodes |
+|---|---|---|
+| 512 | 3.5% | **90%** |
+| 1024 | 0% | **70%** |
+| 2048 | 0% | **18.5%** |
+| 4096 | 0% | 0% |
+| Average score | 2.5K | **14.5K** |
+| Games tested | 200 | 200 |
+
+With less than a sixth of the old DQN's training episodes, the afterstate agent reaches 2048 in almost one game in five. 4096 needs more training.
+
+### Training progress
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/training_progress_dark.png">
+  <img src="docs/images/training_progress_light.png" alt="Three charts over training episodes: average score rising past 16K, share of games reaching 1024 rising to about 70% and 2048 rising to about 28%, and training loss rising from 0.004 to 0.03">
+</picture>
+
+- **Score.** Each dot is one game and the line is the 100-game average. Progress plateaus around episodes 800–2,300 and then climbs again.
+- **Tile rates.** These show the share of the last 500 games that reached 1024, 2048 and 4096.
+- **Loss going up is expected here.** The network predicts the points still to come, and those values grow as the agent survives longer (a 2048 game is worth roughly 4× a 512 game). Bigger targets mean bigger squared errors, even when the relative error is flat.
+
+Regenerate the charts with `python -m CNN.plot_training` (needs `matplotlib`).
+
+### Network architecture
+
+```mermaid
+flowchart TD
+    IN["Board · 4×4 one-hot, 16 channels<br/>(empty, 2, 4, 8, … 32768)"]
+    IN --> H1["Conv 1×2 · 128 · ReLU<br/>4×3 map"]
+    IN --> V1["Conv 2×1 · 128 · ReLU<br/>3×4 map"]
+    H1 --> H2["Conv 1×2 · 128<br/>4×2 map"]
+    H1 --> X1["Conv 2×1 · 128<br/>3×3 map"]
+    V1 --> X2["Conv 1×2 · 128<br/>3×3 map"]
+    V1 --> V2["Conv 2×1 · 128<br/>2×4 map"]
+    H1 & H2 & X1 & X2 & V2 & V1 --> CAT["Flatten + concatenate all 6 maps<br/>58 × 128 = 7,424 features"]
+    CAT --> FC["Dense 256 · ReLU"]
+    FC --> OUT["V(afterstate) · one number"]
+```
+
+- **Input.** Each cell becomes 16 on/off channels: channel 0 means empty and channel *k* means tile 2^k. This way the network sees "a 512 next to a 512" as a pattern, not as a large number.
+- **Directional convolutions.** 1×2 kernels look at horizontal neighbor pairs and 2×1 kernels look at vertical pairs. Those are exactly the pairs that can merge on a left/right or up/down slide. Stacking two layers covers rows and columns of 3, and the cross branches (1×2 then 2×1, and the reverse) cover 2×2 squares.
+- **Head.** All six feature maps are flattened, concatenated and passed through one hidden layer to a single value. That value is the predicted future score (scaled by 1/1000) of the afterstate.
+- **Size.** 2.04M parameters: 1.90M in the first dense layer and 140K in the convolutions. This is the same trunk the old DQN used. Only the output changed, from 4 move values to 1 board value.
+
+### Train, resume, evaluate
+
+```bash
+# train (CPU is ~2x faster than the Metal GPU on Apple silicon; wrap in caffeinate so the Mac stays awake)
+caffeinate -i python -m CNN.cnn_afterstate --episodes 5000 --resume \
+  --save-path bin/cnn_after_pilot.chkpt --metrics-path CNN/logs/cnn_after_pilot_train.csv \
+  --log-interval 100 --checkpoint-interval 200 >> CNN/logs/cnn_after_pilot.out 2>&1
+
+# evaluate a checkpoint with 200 greedy games (prints the tile table)
+python -m CNN.cnn_afterstate --eval-only --resume --save-path bin/cnn_after_pilot.chkpt --eval-episodes 200
+```
+
+`--resume` continues from the last checkpoint: weights, optimizer state, replay buffer and episode counter. Checkpoints are written atomically every `--checkpoint-interval` episodes, so an interrupted run loses at most that many episodes. On an M2 Pro CPU, 3,000 episodes take about 1.2 hours.
+
 ## Local training with Q-learning
 
 The repository now ships with a lightweight Q-learning trainer that plays directly against the Python environment. It collects experience, updates a tabular policy, and can optionally resume from a saved checkpoint.
