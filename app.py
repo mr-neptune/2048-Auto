@@ -5,7 +5,8 @@ import numpy as np
 from flask import Flask, jsonify, request, render_template
 
 from CNN.cnn_agent import DQNAgent, board_to_onehot, load_checkpoint
-from CNN.cnn_afterstate import AfterstateAgent, legal_afterstates
+from CNN.cnn_afterstate import AfterstateAgent, board_to_exp, legal_afterstates
+from CNN.afterstate_search import expectimax_action
 from game2048 import Game2048
 
 app = Flask(__name__)
@@ -78,8 +79,11 @@ def get_afterstate_agent():
     return _afterstate_agent
 
 
+AFTERSTATE_MODELS = ("afterstate", "afterstate_search")
+
+
 def get_agent_for(model):
-    if model == "afterstate":
+    if model in AFTERSTATE_MODELS:
         return get_afterstate_agent(), AFTERSTATE_CKPT_PATH
     return get_cnn_agent(), CNN_CKPT_PATH
 
@@ -129,6 +133,11 @@ def choose_afterstate_action(agent):
     return int(actions[i])
 
 
+def choose_search_action(agent):
+    """2-ply expectimax move (looks one tile spawn ahead), or None when no move is legal."""
+    return expectimax_action(agent, board_to_exp(game.board), _afterstate_reward_scale)
+
+
 def choose_dqn_action(agent):
     """Greedy DQN move for the current board, or None when no move is legal."""
     available_actions = game.get_available_actions()
@@ -145,7 +154,12 @@ def agent_move():
     if agent is None:
         return jsonify(error="Agent is not loaded."), 404
 
-    action = choose_afterstate_action(agent) if model == "afterstate" else choose_dqn_action(agent)
+    if model == "afterstate_search":
+        action = choose_search_action(agent)
+    elif model == "afterstate":
+        action = choose_afterstate_action(agent)
+    else:
+        action = choose_dqn_action(agent)
     if action is None:
         board = [[int(cell) for cell in row] for row in game.board.tolist()]
         return jsonify(board=board, score=int(game.score), game_over=True, action=None)
