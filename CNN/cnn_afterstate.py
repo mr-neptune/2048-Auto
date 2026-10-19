@@ -33,7 +33,6 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 from game2048 import Game2048
-from db import postgres as db
 from CNN.cnn_agent import N_CHANNELS, conv_block_h, conv_block_v, cross_maps, prepare_metrics_writer
 
 TILE_THRESHOLDS = (512, 1024, 2048, 4096, 8192, 16384)
@@ -304,9 +303,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-episodes", type=int, default=0, help="Greedy games to play after training")
     p.add_argument("--eval-only", action="store_true", help="Skip training; evaluate --load-path/--save-path")
     p.add_argument("--eval-metrics-path", type=str, default="")
-    p.add_argument("--db-url", type=str, default="", help="Postgres URL; defaults to POSTGRES_URL/DATABASE_URL")
-    p.add_argument("--db-run-name", type=str, default="")
-    p.add_argument("--db-notes", type=str, default="")
     return p.parse_args()
 
 
@@ -339,13 +335,6 @@ def main() -> None:
             handle.close()
         return
 
-    db_ctx = db.init_run(
-        db_url=db.get_db_url(args.db_url),
-        model_name="cnn_afterstate",
-        run_name=args.db_run_name,
-        notes=args.db_notes,
-        params={k: v for k, v in vars(args).items() if k not in ("db_url", "db_run_name", "db_notes")},
-    )
     metrics_writer, metrics_file = prepare_metrics_writer(args.metrics_path, append=start_episode > 1)
     recent = deque(maxlen=args.log_interval)
     update_carry = 0.0
@@ -370,8 +359,6 @@ def main() -> None:
             if metrics_writer:
                 metrics_writer.writerow([episode, stats.score, stats.reward, stats.moves, stats.max_tile, args.epsilon])
                 metrics_file.flush()
-            db.log_metrics(db_ctx, phase="train", episode=episode, score=stats.score, reward=stats.reward,
-                           moves=stats.moves, max_tile=stats.max_tile, epsilon=args.epsilon)
             last_done = episode
 
             if episode % args.log_interval == 0:
@@ -399,7 +386,6 @@ def main() -> None:
     finally:
         if metrics_file:
             metrics_file.close()
-        db.close(db_ctx)
         if args.save_path:
             save_checkpoint(args.save_path, agent, buffer, last_done, args)
             print(f"Saved checkpoint at episode {last_done} to '{args.save_path}'")
