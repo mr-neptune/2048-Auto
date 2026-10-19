@@ -37,7 +37,6 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 from game2048 import Game2048
-from db import postgres as db
 
 
 # --------------------------- Encoding & Augmentation ---------------------------
@@ -46,13 +45,11 @@ N_CHANNELS = 16  # empty + 2..2^15 (clamped)
 
 def board_to_onehot(board: np.ndarray, n_channels: int = N_CHANNELS) -> np.ndarray:
     """Return one-hot (4,4,16). ch 0=empty, ch k=2^k (clamped to 15)."""
-    onehot = np.zeros((4, 4, n_channels), dtype=np.float32)
-    for r in range(4):
-        for c in range(4):
-            v = int(board[r, c])
-            k = 0 if v == 0 else min(int(np.log2(v)), n_channels - 1)
-            onehot[r, c, k] = 1.0
-    return onehot
+    b = np.asarray(board)
+    k = np.zeros(b.shape, dtype=np.int64)
+    nz = b > 0
+    k[nz] = np.minimum(np.log2(b[nz]).astype(np.int64), n_channels - 1)
+    return np.eye(n_channels, dtype=np.float32)[k]
 
 # Action map to index according to game2048.py
 A_UP, A_RIGHT, A_DOWN, A_LEFT = 0, 1, 2, 3
@@ -81,6 +78,25 @@ def remap_actions(actions: Sequence[int], k: int) -> List[int]:
     return [remap_action(a, k) for a in actions]
 
 
+# ROT_TABLE[k, a] == ROT_ACTION[k][a], for vectorized remapping
+ROT_TABLE = np.array([[ROT_ACTION[k][a] for a in range(4)] for k in range(4)], dtype=np.int32)
+
+
+def augment_batch(s, a, s2, next_mask, ks):
+    """Rotate each sample i by ks[i]*90 degrees cw; remap actions and next-action masks."""
+    s_aug, s2_aug = s.copy(), s2.copy()
+    for k in (1, 2, 3):
+        idx = np.flatnonzero(ks == k)
+        if idx.size:
+            s_aug[idx] = np.rot90(s[idx], k=4 - k, axes=(1, 2))
+            s2_aug[idx] = np.rot90(s2[idx], k=4 - k, axes=(1, 2))
+    a_aug = ROT_TABLE[ks, a]
+    # remapped action ROT_TABLE[k, j] inherits the availability of original action j
+    mask_aug = np.zeros_like(next_mask)
+    mask_aug[np.arange(len(ks))[:, None], ROT_TABLE[ks]] = next_mask
+    return s_aug, a_aug, s2_aug, mask_aug
+
+
 
 # ----------------------------- Replay & N-step -------------------------------
 @dataclass
@@ -93,53 +109,88 @@ class EpisodeStats:
 
 class ReplayBuffer:
     """
-    Uniform buffer with PER-lite sampling toward positive rewards.
-    pos_frac: fraction of transitions with positive rewards.
+    Numpy ring buffer with PER-lite sampling toward positive rewards.
+    pos_frac: fraction of each batch drawn from positive-reward transitions;
+    the rest is drawn uniformly (with replacement) from the whole buffer.
+    States are stored as uint8 one-hot and returned as float32.
     """
-    def __init__(self, capacity: int, pos_frac: float = 0.5) -> None:
-        self.capacity = capacity
-        self.buf = deque(maxlen=capacity)
+    def __init__(self, capacity: int, pos_frac: float = 0.5, n_actions: int = 4) -> None:
         self.pos_frac = float(np.clip(pos_frac, 0.0, 1.0))
+        self.n_actions = n_actions
+        self._alloc(capacity)
+
+    def _alloc(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.s = np.zeros((capacity, 4, 4, N_CHANNELS), dtype=np.uint8)
+        self.a = np.zeros(capacity, dtype=np.int32)
+        self.r = np.zeros(capacity, dtype=np.float32)
+        self.s2 = np.zeros((capacity, 4, 4, N_CHANNELS), dtype=np.uint8)
+        self.d = np.zeros(capacity, dtype=np.bool_)
+        self.next_mask = np.zeros((capacity, self.n_actions), dtype=np.float32)
+        self.pos = 0  # next write index
+        self.size = 0
 
     def push(self, s, a, r, s2, done, next_avail) -> None:
-        self.buf.append((s, a, r, s2, done, tuple(next_avail)))
+        i = self.pos
+        self.s[i] = s
+        self.a[i] = a
+        self.r[i] = r
+        self.s2[i] = s2
+        self.d[i] = done
+        self.next_mask[i] = 0.0
+        if next_avail:
+            self.next_mask[i, list(next_avail)] = 1.0
+        self.pos = (i + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     def __len__(self) -> int:
-        return len(self.buf)
+        return self.size
 
     def sample(self, batch_size: int):
+        n = self.size
         if self.pos_frac <= 1e-6:
-            batch = random.sample(self.buf, batch_size)
+            idxs = np.random.randint(0, n, size=batch_size)
         else:
-            pos_idx = [i for i, (_, _, r, *_rest) in enumerate(self.buf) if r > 0]
+            pos_idx = np.flatnonzero(self.r[:n] > 0)
             k_pos = min(int(math.ceil(batch_size * self.pos_frac)), len(pos_idx))
-            pos_samples = random.sample(pos_idx, k_pos) if k_pos > 0 else []
-            remain = batch_size - len(pos_samples)
-            pool = [i for i in range(len(self.buf)) if i not in pos_samples]
-            others = random.sample(pool, remain)
-            idxs = pos_samples + others
-            random.shuffle(idxs)
-            batch = [self.buf[i] for i in idxs]
-        s, a, r, s2, d, next_avail = zip(*batch)
+            pos_samples = np.random.choice(pos_idx, k_pos, replace=False)
+            others = np.random.randint(0, n, size=batch_size - k_pos)
+            idxs = np.concatenate([pos_samples, others])
         return (
-            np.stack(s).astype(np.float32),
-            np.array(a, dtype=np.int32),
-            np.array(r, dtype=np.float32),
-            np.stack(s2).astype(np.float32),
-            np.array(d, dtype=np.bool_),
-            next_avail,
+            self.s[idxs].astype(np.float32),
+            self.a[idxs],
+            self.r[idxs],
+            self.s2[idxs].astype(np.float32),
+            self.d[idxs],
+            self.next_mask[idxs],
         )
 
     def state_dict(self):
-        return {"capacity": self.capacity, "data": list(self.buf), "pos_frac": self.pos_frac}
+        n = self.size
+        return {
+            "capacity": self.capacity,
+            "pos_frac": self.pos_frac,
+            "pos": self.pos,
+            "size": n,
+            "s": self.s[:n], "a": self.a[:n], "r": self.r[:n],
+            "s2": self.s2[:n], "d": self.d[:n], "next_mask": self.next_mask[:n],
+        }
 
     def load_state(self, state):
         if not state:
             return
-        self.capacity = int(state.get("capacity", self.capacity))
         self.pos_frac = float(state.get("pos_frac", self.pos_frac))
-        data = state.get("data", [])
-        self.buf = deque(data, maxlen=self.capacity)
+        self._alloc(int(state.get("capacity", self.capacity)))
+        if "data" in state:
+            # legacy deque checkpoint: list of (s, a, r, s2, done, next_avail), oldest first
+            for tr in state["data"][-self.capacity:]:
+                self.push(*tr)
+            return
+        n = min(int(state["size"]), self.capacity)
+        for key in ("s", "a", "r", "s2", "d", "next_mask"):
+            getattr(self, key)[:n] = state[key][:n]
+        self.size = n
+        self.pos = int(state["pos"]) % self.capacity
 
 
 class NStepBuilder:
@@ -270,14 +321,19 @@ class DQNAgent:
             self.loss_fn = keras.losses.Huber()
 
 
+    @tf.function(input_signature=[tf.TensorSpec((None, 4, 4, N_CHANNELS), tf.float32)])
+    def _q_values(self, x):
+        # compiled forward pass; eager keras calls cost ~10ms each
+        return self.q(x, training=False)
+
     def select_action(self, state_oh: np.ndarray, available_actions: Sequence[int], explore=True) -> int:
         if not available_actions:
             return 0
         if explore and random.random() < self.eps:
             return random.choice(list(available_actions))
-        
+
         # get q values for each action
-        q = self.q(np.expand_dims(state_oh, 0), training=False).numpy()[0]
+        q = self._q_values(np.expand_dims(state_oh, 0).astype(np.float32)).numpy()[0]
         # mask illegal actions with -inf
         masked = np.full_like(q, -np.inf, dtype=np.float32)
 
@@ -292,20 +348,21 @@ class DQNAgent:
 
     @tf.function
     def _train_step(self, s, a, r, s2, d, next_mask, gamma_n):
+        # Double DQN target (no gradient flows through it, so build it outside the tape)
+        q_next_online = self.q(s2, training=False)
+        neg_inf = tf.constant(-1e9, dtype=q_next_online.dtype)
+        masked_next = q_next_online + (1.0 - next_mask) * neg_inf
+        next_act = tf.argmax(masked_next, axis=1, output_type=tf.int32)
+
+        q_next_target = self.tgt(s2, training=False)
+        q_next_target_sa = tf.gather(q_next_target, next_act, batch_dims=1)
+
+        not_done = tf.cast(tf.logical_not(d), tf.float32)
+        target = r + not_done * gamma_n * q_next_target_sa
+
         with tf.GradientTape() as tape:
             q_all = self.q(s, training=True)                # (B,4)
             q_sa = tf.gather(q_all, a, batch_dims=1)        # (B,)
-
-            q_next_online = self.q(s2, training=False)
-            neg_inf = tf.constant(-1e9, dtype=q_next_online.dtype)
-            masked_next = q_next_online + (1.0 - next_mask) * neg_inf
-            next_act = tf.argmax(masked_next, axis=1, output_type=tf.int32)
-
-            q_next_target = self.tgt(s2, training=False)
-            q_next_target_sa = tf.gather(q_next_target, next_act, batch_dims=1)
-
-            not_done = tf.cast(tf.logical_not(d), tf.float32)
-            target = r + not_done * gamma_n * q_next_target_sa
             loss = self.loss_fn(target, q_sa)
 
         vars = self.q.trainable_variables
@@ -318,26 +375,15 @@ class DQNAgent:
         return loss
 
     def update(self, batch, aug_rot_prob: float = 0.5, gamma_n: float | None = None):
-        s, a, r, s2, d, next_avail = batch
+        s, a, r, s2, d, next_mask = batch
         B = s.shape[0]
 
         # Optional symmetry augmentation via random rotations
         if aug_rot_prob > 0:
             ks = np.random.choice([0, 1, 2, 3], size=B, p=[1 - aug_rot_prob, aug_rot_prob/3, aug_rot_prob/3, aug_rot_prob/3])
-            s_aug = np.stack([rotate_state(s[i], int(ks[i])) for i in range(B)])
-            s2_aug = np.stack([rotate_state(s2[i], int(ks[i])) for i in range(B)])
-            a_aug = np.array([remap_action(a[i], int(ks[i])) for i in range(B)], dtype=np.int32)
-            next_mask = np.zeros((B, self.n_actions), dtype=np.float32)
-            for i in range(B):
-                avail = remap_actions(next_avail[i], int(ks[i]))
-                if avail:
-                    next_mask[i, list(avail)] = 1.0
+            s_aug, a_aug, s2_aug, next_mask = augment_batch(s, a, s2, next_mask, ks)
         else:
             s_aug, s2_aug, a_aug = s, s2, a
-            next_mask = np.zeros((B, self.n_actions), dtype=np.float32)
-            for i, avail in enumerate(next_avail):
-                if avail:
-                    next_mask[i, list(avail)] = 1.0
 
         gamma_eff = self.gamma if gamma_n is None else gamma_n
         loss = self._train_step(
@@ -484,7 +530,6 @@ def evaluate_agent(
     reward_clip: float | None,
     eval_writer=None,
     eval_file=None,
-    db_ctx=None,
 ) -> EpisodeStats:
     scores: List[int] = []
     rewards: List[float] = []
@@ -515,16 +560,6 @@ def evaluate_agent(
                 eval_writer.writerow([epi, stats.score, stats.reward, stats.moves, stats.max_tile, 0.0])
                 if eval_file is not None:
                     eval_file.flush()
-            db.log_metrics(
-                db_ctx,
-                phase="eval",
-                episode=epi,
-                score=stats.score,
-                reward=stats.reward,
-                moves=stats.moves,
-                max_tile=stats.max_tile,
-                epsilon=0.0,
-            )
     finally:
         agent.eps = eps0
 
@@ -590,6 +625,7 @@ def export_model_weights_csv(model: keras.Model, path: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--episodes", type=int, default=2000)
+    p.add_argument("--start-episode", type=int, default=1, help="Starting episode number for metrics logging (use when resuming)")
     p.add_argument("--checkpoint-interval", type=int, default=200, help="Save checkpoint every N episodes (0 to disable)")
     p.add_argument("--gamma", type=float, default=0.9)
     p.add_argument("--epsilon", type=float, default=0.9)
@@ -610,7 +646,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup", type=int, default=5_000)
     p.add_argument("--target-sync", type=int, default=1_000)
     p.add_argument("--updates-per-step", type=float, default=0.5)
-    p.add_argument("--device", type=str, default="/GPU:0")
+    p.add_argument("--device", type=str, default="/CPU:0", help="/CPU:0 is ~2x faster than Metal /GPU:0 on Apple silicon; use /GPU:0 on CUDA")
 
     p.add_argument("--channels", type=int, default=128, help="Conv channels per layer")
     p.add_argument("--aug-rot-prob", type=float, default=0.5, help="Prob. of applying a random 90deg rotation to each sample in a batch")
@@ -631,9 +667,6 @@ def parse_args() -> argparse.Namespace:
         help="Append to an existing eval metrics file instead of overwriting it",
     )
     p.add_argument("--weights-csv", type=str, default="")
-    p.add_argument("--db-url", type=str, default="", help="Postgres URL; defaults to POSTGRES_URL/DATABASE_URL")
-    p.add_argument("--db-run-name", type=str, default="", help="Optional run name stored in Postgres")
-    p.add_argument("--db-notes", type=str, default="", help="Optional run notes stored in Postgres")
     return p.parse_args()
 
 # ---------------------------------- Main ------------------------------------
@@ -641,21 +674,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    if args.device.upper().startswith("/CPU"):
+        # tf.device() only pins variables; hide GPUs so every op runs on CPU
+        tf.config.set_visible_devices([], "GPU")
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     tf.random.set_seed(args.seed)
 
     env = Game2048()
-
-    db_url = db.get_db_url(args.db_url)
-    run_params = {k: v for k, v in vars(args).items() if k not in ("db_url", "db_run_name", "db_notes")}
-    db_ctx = db.init_run(
-        db_url=db_url,
-        model_name="cnn_dqn",
-        run_name=args.db_run_name,
-        notes=args.db_notes,
-        params=run_params,
-    )
 
     agent = DQNAgent(
         n_actions=4,
@@ -685,7 +712,7 @@ def main() -> None:
     recent: Deque[EpisodeStats] = deque(maxlen=args.log_interval)
 
     try:
-        for episode in range(1, args.episodes + 1):
+        for episode in range(args.start_episode, args.start_episode + args.episodes):
             stats = run_episode(
                 agent,
                 env,
@@ -703,16 +730,6 @@ def main() -> None:
                 metrics_writer.writerow([episode, stats.score, stats.reward, stats.moves, stats.max_tile, agent.eps])
                 if metrics_file:
                     metrics_file.flush()
-            db.log_metrics(
-                db_ctx,
-                phase="train",
-                episode=episode,
-                score=stats.score,
-                reward=stats.reward,
-                moves=stats.moves,
-                max_tile=stats.max_tile,
-                epsilon=agent.eps,
-            )
 
             # Learning updates after the episode
             updates = int(max(1, args.updates_per_step * stats.moves))
@@ -750,7 +767,6 @@ def main() -> None:
                 reward_clip=(args.reward_clip if args.reward_clip > 0 else None),
                 eval_writer=eval_writer,
                 eval_file=eval_file,
-                db_ctx=db_ctx,
             )
             if eval_file:
                 eval_file.close()
@@ -762,7 +778,6 @@ def main() -> None:
     finally:
         if metrics_file:
             metrics_file.close()
-        db.close(db_ctx)
         if args.save_path:
             save_checkpoint(args.save_path, agent, buffer)
             print(f"Saved checkpoint to '{args.save_path}'")
