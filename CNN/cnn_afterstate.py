@@ -35,6 +35,7 @@ from tensorflow.keras import layers
 
 from game2048 import Game2048
 from CNN.cnn_agent import N_CHANNELS, conv_block_h, conv_block_v, cross_maps, prepare_metrics_writer
+from CNN.afterstate_search import expectimax_action
 
 TILE_THRESHOLDS = (512, 1024, 2048, 4096, 8192, 16384)
 
@@ -243,15 +244,34 @@ def scheduled_lr(args, episode: int) -> float:
     return args.lr_min + 0.5 * (args.lr - args.lr_min) * (1.0 + math.cos(math.pi * progress))
 
 
+def run_search_episode(agent: AfterstateAgent, env: Game2048, *, reward_scale: float) -> EpisodeStats:
+    """Play one game choosing every move by 2-ply expectimax (evaluation only, no training data)."""
+    env.reset()
+    moves = 0
+    while True:
+        action = expectimax_action(agent, board_to_exp(env.board), reward_scale)
+        if action is None:
+            break
+        _, _, done = env.step(action)
+        moves += 1
+        if done:
+            break
+    return EpisodeStats(reward=reward_scale * env.score, score=int(env.score), moves=moves, max_tile=int(env.board.max()))
+
+
 def tile_rates(max_tiles) -> dict:
     n = max(1, len(max_tiles))
     return {t: sum(m >= t for m in max_tiles) / n for t in TILE_THRESHOLDS}
 
 
-def evaluate(agent: AfterstateAgent, env: Game2048, games: int, reward_scale: float, writer=None, handle=None):
+def evaluate(agent: AfterstateAgent, env: Game2048, games: int, reward_scale: float, writer=None, handle=None,
+             search_depth: int = 1):
     scores, tiles = [], []
     for g in range(1, games + 1):
-        stats, *_ = run_episode(agent, env, reward_scale=reward_scale, epsilon=0.0)
+        if search_depth >= 2:
+            stats = run_search_episode(agent, env, reward_scale=reward_scale)
+        else:
+            stats, *_ = run_episode(agent, env, reward_scale=reward_scale, epsilon=0.0)
         scores.append(stats.score)
         tiles.append(stats.max_tile)
         if writer is not None:
@@ -318,6 +338,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--metrics-path", type=str, default="")
     p.add_argument("--eval-episodes", type=int, default=0, help="Greedy games to play after training")
     p.add_argument("--eval-only", action="store_true", help="Skip training; evaluate --load-path/--save-path")
+    p.add_argument("--search-depth", type=int, choices=(1, 2), default=1,
+                   help="Evaluation move choice: 1 = greedy, 2 = expectimax over the next tile spawn")
     p.add_argument("--eval-metrics-path", type=str, default="")
     return p.parse_args()
 
@@ -346,7 +368,7 @@ def main() -> None:
 
     if args.eval_only:
         writer, handle = prepare_metrics_writer(args.eval_metrics_path, append=False)
-        evaluate(agent, env, max(1, args.eval_episodes), args.reward_scale, writer, handle)
+        evaluate(agent, env, max(1, args.eval_episodes), args.reward_scale, writer, handle, args.search_depth)
         if handle:
             handle.close()
         return
@@ -399,7 +421,7 @@ def main() -> None:
 
         if args.eval_episodes > 0:
             writer, handle = prepare_metrics_writer(args.eval_metrics_path, append=False)
-            evaluate(agent, env, args.eval_episodes, args.reward_scale, writer, handle)
+            evaluate(agent, env, args.eval_episodes, args.reward_scale, writer, handle, args.search_depth)
             if handle:
                 handle.close()
     finally:
