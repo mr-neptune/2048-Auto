@@ -18,6 +18,7 @@ learners (n-tuple TD players, CNN value nets) are trained.
 """
 
 import argparse
+import math
 import os
 import pickle
 import random
@@ -202,6 +203,9 @@ class AfterstateAgent:
     def update(self, exps: np.ndarray, targets: np.ndarray) -> float:
         return float(self._train_step(exps, targets))
 
+    def set_lr(self, lr: float) -> None:
+        self.opt.learning_rate = lr
+
     def state_dict(self):
         return {"v_weights": self.v.get_weights(), "opt_vars": [v.numpy() for v in self.opt.variables]}
 
@@ -243,6 +247,15 @@ def run_episode(agent: AfterstateAgent, env: Game2048, *, reward_scale: float, e
             break
     stats = EpisodeStats(reward=float(sum(rewards)), score=int(env.score), moves=len(exps), max_tile=int(env.board.max()))
     return stats, exps, rewards, values
+
+
+def scheduled_lr(args, episode: int) -> float:
+    """Cosine decay from --lr to --lr-min over episodes [--lr-decay-start, --episodes]; constant otherwise."""
+    if args.lr_schedule != "cosine":
+        return args.lr
+    span = max(1, args.episodes - args.lr_decay_start)
+    progress = min(1.0, max(0.0, (episode - args.lr_decay_start) / span))
+    return args.lr_min + 0.5 * (args.lr - args.lr_min) * (1.0 + math.cos(math.pi * progress))
 
 
 def tile_rates(max_tiles) -> dict:
@@ -306,7 +319,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lam", type=float, default=0.5, help="TD(lambda): 0 = one-step TD, 1 = Monte Carlo")
     p.add_argument("--reward-scale", type=float, default=1e-3, help="Score delta multiplier (values stay ~O(1-100))")
     p.add_argument("--epsilon", type=float, default=0.0, help="Random-move probability while training")
-    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--lr", type=float, default=1e-4, help="Learning rate (peak rate when --lr-schedule cosine)")
+    p.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant")
+    p.add_argument("--lr-min", type=float, default=1e-5, help="Final learning rate for --lr-schedule cosine")
+    p.add_argument("--lr-decay-start", type=int, default=0, help="Episode where the cosine decay begins")
     p.add_argument("--channels", type=int, default=128)
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--arch", choices=("v1", "v2"), default="v1", help="v2 adds row/column/block detectors and a deeper head")
@@ -369,6 +385,8 @@ def main() -> None:
 
             update_carry += stats.moves * args.replay_ratio / args.batch_size
             n_updates, update_carry = int(update_carry), update_carry - int(update_carry)
+            lr = scheduled_lr(args, episode)
+            agent.set_lr(lr)
             if len(buffer) >= max(args.warmup, args.batch_size):
                 for _ in range(n_updates):
                     losses.append(agent.update(*buffer.sample(args.batch_size)))
@@ -385,7 +403,8 @@ def main() -> None:
                     f"Episode {episode:>6}: avg score={mean(s.score for s in recent):8.0f} | "
                     f"1024={rates[1024]*100:5.1f}% 2048={rates[2048]*100:5.1f}% 4096={rates[4096]*100:5.1f}% | "
                     f"best tile={max(s.max_tile for s in recent):5d} | "
-                    f"loss={mean(losses) if losses else 0:.4f} | {dt / len(recent):.2f}s/ep {moves_log / max(dt, 1e-9):.0f} moves/s",
+                    f"loss={mean(losses) if losses else 0:.4f} lr={lr:.2e} | "
+                    f"{dt / len(recent):.2f}s/ep {moves_log / max(dt, 1e-9):.0f} moves/s",
                     flush=True,
                 )
                 t_log, moves_log = time.time(), 0
