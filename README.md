@@ -99,35 +99,37 @@ python -m CNN.cnn_afterstate --eval-only --resume --save-path bin/cnn_after_pilo
 
 `--resume` continues from the last checkpoint: weights, optimizer state, replay buffer and episode counter. Checkpoints are written atomically every `--checkpoint-interval` episodes, so an interrupted run loses at most that many episodes. On an M2 Pro CPU, 3,000 episodes take about 1.2 hours.
 
-## Local training with Q-learning
-
-The repository now ships with a lightweight Q-learning trainer that plays directly against the Python environment. It collects experience, updates a tabular policy, and can optionally resume from a saved checkpoint.
-
-Run a training session (this also evaluates the greedy policy once training finishes):
+## Getting started
 
 ```bash
-python train_agent.py --episodes 5000 --log-interval 250
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m flask --app app run --port 5001   # browser UI at http://localhost:5001
 ```
 
-Key options:
+## Repository layout
 
-- `--episodes` – number of training games to run.
-- `--alpha`, `--gamma`, `--epsilon`, `--epsilon-decay`, `--epsilon-min` – standard Q-learning hyperparameters.
-- `--load-path` – path to an existing `bin/q_table.pkl` to continue training.
-- `--save-path` – where to store the trained table (defaults to `bin/q_table.pkl`).
-- `--eval-episodes` – how many greedy runs to average for the evaluation summary.
+| Path | What it is |
+|---|---|
+| `game2048.py` | 2048 game rules, shared by training and the web UI |
+| `app.py`, `templates/`, `static/` | Flask server and browser UI, including agent auto-play |
+| `CNN/cnn_afterstate.py` | Afterstate value-learning agent (current model): train, resume, evaluate |
+| `CNN/cnn_agent.py` | Earlier DQN agent; also provides the shared convolution blocks |
+| `CNN/plot_training.py` | Builds the training-progress charts from the logs |
+| `docs/images/` | Images used in this README |
 
-After training you can point the front-end’s auto-play logic to the resulting policy or use the saved table to bootstrap more advanced agents.
+Checkpoints (`bin/`), training logs (`CNN/logs/`) and the virtual environment (`.venv/`) are kept local and are not committed.
 
-## Optional Postgres metrics logging
+## Branches
 
-If you want to log per-episode metrics to Postgres (for visual inspection in tools like TablePlus), run Postgres with Docker and pass a connection URL to the training scripts.
+| Branch | Used for | What it stores |
+|---|---|---|
+| `cnn_training` *(default)* | Main line of development | Everything above: game, UI, the afterstate CNN agent, the earlier DQN, plotting, docs |
+| `main` | Stable copy of `cnn_training` | Updated from `cnn_training` at milestones |
+| `lever_lr_decay` | Experiment: a learning rate that shrinks during training | `cnn_training` plus `--lr-schedule cosine` in the afterstate trainer |
+| `lever_bigger_net` | Experiment: a larger value network | `cnn_training` plus `--arch v2` (whole-row, whole-column and block detectors, deeper head) |
+| `lever_search` | Experiment: 2-ply look-ahead when playing | `cnn_training` plus `CNN/afterstate_search.py` and `--search-depth 2` for evaluation |
+| `postgreDB` | Archive: Postgres metrics logging | `db/`, `docker-compose.yml`, trainers with `--db-url` logging |
+| `mlp_training` | Archive: the earlier MLP Q-learning agent | `MLP/` agent, features and its training logs |
 
-```bash
-docker compose up -d
-export POSTGRES_URL="postgresql://2048_user:2048_pass@localhost:5432/2048_db"
-python CNN/cnn_agent.py --episodes 1000 --db-run-name "cnn-run-1"
-python MLP/mlp_agent.py --episodes 1000 --db-run-name "mlp-run-1"
-```
-
-Schema reference lives at `db/schema.sql`.
+Each `lever_*` branch changes exactly one thing compared with `cnn_training`, so its effect on the agent can be measured on its own before it is merged.
