@@ -263,6 +263,11 @@ def save_checkpoint(path: str, agent: AfterstateAgent, buffer: ReturnBuffer, epi
     os.replace(tmp, p)  # atomic: a crash mid-write never corrupts the last good checkpoint
 
 
+def snapshot_path(save_path: str, episode: int) -> str:
+    p = Path(save_path)
+    return str(p.with_name(f"{p.stem}_ep{episode}{p.suffix}"))
+
+
 def load_checkpoint(path: str) -> dict:
     with Path(path).open("rb") as h:
         return pickle.load(h)
@@ -277,6 +282,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--resume", action="store_true", help="Continue from --save-path if it exists")
     p.add_argument("--load-path", type=str, default="", help="Load weights only (fresh replay, episode counter from 1)")
     p.add_argument("--checkpoint-interval", type=int, default=200)
+    p.add_argument("--snapshot-interval", type=int, default=0,
+                   help="Also keep a copy <save-path stem>_ep<N> every N episodes (0 to disable)")
     p.add_argument("--log-interval", type=int, default=100)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", type=str, default="/CPU:0", help="/CPU:0 is ~2x faster than Metal /GPU:0 on Apple silicon; use /GPU:0 on CUDA")
@@ -381,6 +388,8 @@ def main() -> None:
 
             if args.save_path and args.checkpoint_interval > 0 and episode % args.checkpoint_interval == 0:
                 save_checkpoint(args.save_path, agent, buffer, episode, args)
+            if args.save_path and args.snapshot_interval > 0 and episode % args.snapshot_interval == 0:
+                save_checkpoint(snapshot_path(args.save_path, episode), agent, buffer, episode, args)
 
         if args.eval_episodes > 0:
             writer, handle = prepare_metrics_writer(args.eval_metrics_path, append=False)
