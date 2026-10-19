@@ -99,6 +99,21 @@ python -m CNN.cnn_afterstate --eval-only --resume --save-path bin/cnn_after_pilo
 
 `--resume` continues from the last checkpoint: weights, optimizer state, replay buffer and episode counter. Checkpoints are written atomically every `--checkpoint-interval` episodes, so an interrupted run loses at most that many episodes. On an M2 Pro CPU, 3,000 episodes take about 1.2 hours.
 
+Add `--lr-schedule cosine --lr-decay-start <episode>` to shrink the learning rate from `--lr` (1e-4) down to `--lr-min` (1e-5) between that episode and `--episodes`. In our tests this was the biggest training improvement (see below).
+
+### Experiments: one change at a time
+
+Each experiment changes exactly one thing and is judged on the same 500 greedy test games (same random seed).
+
+| Experiment | Compared with | Reached 2048 | Reached 4096 | Avg score |
+|---|---|---|---|---|
+| Baseline, 7K episodes | – | 35.4% | 1.4% | 18.5K |
+| Shrinking learning rate (episodes 5K→7K) | baseline at 7K | **58.4%** | **12.6%** | 27.0K |
+| Bigger network (`--arch v2`), 7K episodes | baseline at 7K | **46.4%** | **3.8%** | 21.5K |
+| 2-ply look-ahead when playing (same 7K network) | the same network played greedily | **90.2%** | **43.4%** | 45.7K |
+
+The look-ahead row measures a different thing from the others. It doesn't change the network; it spends about 8× more computation per move to think one tile spawn ahead. Its results are always reported separately from greedy play.
+
 ## Getting started
 
 ```bash
@@ -126,10 +141,10 @@ Checkpoints (`bin/`), training logs (`CNN/logs/`) and the virtual environment (`
 |---|---|---|
 | `cnn_training` *(default)* | Main line of development | Everything above: game, UI, the afterstate CNN agent, the earlier DQN, plotting, docs |
 | `main` | Stable copy of `cnn_training` | Updated from `cnn_training` at milestones |
-| `lever_lr_decay` | Experiment: a learning rate that shrinks during training | `cnn_training` plus `--lr-schedule cosine` in the afterstate trainer |
+| `lever_lr_decay` | Experiment (merged into `cnn_training`): a learning rate that shrinks during training | `--lr-schedule cosine` in the afterstate trainer |
 | `lever_bigger_net` | Experiment: a larger value network | `cnn_training` plus `--arch v2` (whole-row, whole-column and block detectors, deeper head) |
 | `lever_search` | Experiment: 2-ply look-ahead when playing | `cnn_training` plus `CNN/afterstate_search.py` and `--search-depth 2` for evaluation |
 | `postgreDB` | Archive: Postgres metrics logging | `db/`, `docker-compose.yml`, trainers with `--db-url` logging |
 | `mlp_training` | Archive: the earlier MLP Q-learning agent | `MLP/` agent, features and its training logs |
 
-Each `lever_*` branch changes exactly one thing compared with `cnn_training`, so its effect on the agent can be measured on its own before it is merged.
+Each `lever_*` branch changes exactly one thing compared with `cnn_training`, so its effect on the agent can be measured on its own before it is merged. Branches that have been merged are kept as a record of the experiment.
