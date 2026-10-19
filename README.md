@@ -10,7 +10,7 @@ The game logic is implemented in Python 3, and the user interface is implemented
   <img src="docs/images/demo_2048.gif" width="600" alt="The afterstate CNN agent auto-playing 2048 in the browser UI, finishing a game with a 2048 tile at 26,964 points">
 </p>
 
-The final moves of a game played by the afterstate CNN agent (episode-3000 checkpoint, no randomness): it builds a 2048 tile and ends at 26,964 points. To watch it yourself, run `python -m flask --app app run --port 5001`, open http://localhost:5001, pick **CNN Afterstate (new)**, and press **Start Auto Play**.
+The final moves of a game played by the afterstate CNN agent (episode-3000 checkpoint, no randomness): it builds a 2048 tile and ends at 26,964 points. To watch it yourself, run `python -m flask --app app run --port 5001`, open http://localhost:5001, pick **CNN Afterstate (new)** (or **CNN Afterstate + look-ahead** for the stronger 2-ply player), and press **Start Auto Play**.
 
 ## CNN afterstate agent
 
@@ -95,6 +95,9 @@ caffeinate -i python -m CNN.cnn_afterstate --episodes 5000 --resume \
 
 # evaluate a checkpoint with 200 greedy games (prints the tile table)
 python -m CNN.cnn_afterstate --eval-only --resume --save-path bin/cnn_after_pilot.chkpt --eval-episodes 200
+
+# same, but every move uses 2-ply look-ahead (about 8x slower per move)
+python -m CNN.cnn_afterstate --eval-only --resume --save-path bin/cnn_after_pilot.chkpt --eval-episodes 200 --search-depth 2
 ```
 
 `--resume` continues from the last checkpoint: weights, optimizer state, replay buffer and episode counter. Checkpoints are written atomically every `--checkpoint-interval` episodes, so an interrupted run loses at most that many episodes. On an M2 Pro CPU, 3,000 episodes take about 1.2 hours.
@@ -143,7 +146,7 @@ Checkpoints (`bin/`), training logs (`CNN/logs/`) and the virtual environment (`
 | `main` | Stable copy of `cnn_training` | Updated from `cnn_training` at milestones |
 | `lever_lr_decay` | Experiment (merged into `cnn_training`): a learning rate that shrinks during training | `--lr-schedule cosine` in the afterstate trainer |
 | `lever_bigger_net` | Experiment: a larger value network | `cnn_training` plus `--arch v2` (whole-row, whole-column and block detectors, deeper head) |
-| `lever_search` | Experiment: 2-ply look-ahead when playing | `cnn_training` plus `CNN/afterstate_search.py` and `--search-depth 2` for evaluation |
+| `lever_search` | Experiment (merged into `cnn_training`): 2-ply look-ahead when playing | `CNN/afterstate_search.py`, `--search-depth 2` for evaluation |
 | `postgreDB` | Archive: Postgres metrics logging | `db/`, `docker-compose.yml`, trainers with `--db-url` logging |
 | `mlp_training` | Archive: the earlier MLP Q-learning agent | `MLP/` agent, features and its training logs |
 
