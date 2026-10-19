@@ -39,27 +39,28 @@ Training details:
 
 Greedy play (always the best move, no random moves). "Reached" means the game's largest tile was at least that tile.
 
-| Reached tile | Old DQN<br/>20K episodes | **Afterstate CNN**<br/>3K episodes |
-|---|---|---|
-| 512 | 3.5% | **90%** |
-| 1024 | 0% | **70%** |
-| 2048 | 0% | **18.5%** |
-| 4096 | 0% | 0% |
-| Average score | 2.5K | **14.5K** |
-| Games tested | 200 | 200 |
+| Reached tile | Old DQN<br/>20K episodes | Afterstate CNN<br/>3K episodes | **Afterstate CNN**<br/>**5K episodes** |
+|---|---|---|---|
+| 512 | 3.5% | 90% | **92.5%** |
+| 1024 | 0% | 70% | **73.5%** |
+| 2048 | 0% | 18.5% | **29.5%** |
+| 4096 | 0% | 0% | 0% |
+| Average score | 2.5K | 14.5K | **16.9K** |
+| Best score | – | 36.2K | **36.7K** |
+| Games tested | 200 | 200 | 200 |
 
-With less than a sixth of the old DQN's training episodes, the afterstate agent reaches 2048 in almost one game in five. 4096 needs more training.
+With a quarter of the old DQN's training episodes, the afterstate agent reaches 2048 in about 30% of games. 4096 has appeared 11 times during training (first at episode 2,744, best score 57K), but not yet in a 200-game test.
 
 ### Training progress
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/training_progress_dark.png">
-  <img src="docs/images/training_progress_light.png" alt="Three charts over training episodes: average score rising past 16K, share of games reaching 1024 rising to about 70% and 2048 rising to about 28%, and training loss rising from 0.004 to 0.03">
+  <img src="docs/images/training_progress_light.png" alt="Three charts over 5,000 training episodes: average score rising to about 17–19K, share of games reaching 1024 rising to about 80% and 2048 to about 30%, and training loss rising from 0.004 to about 0.07">
 </picture>
 
-- **Score.** Each dot is one game and the line is the 100-game average. Progress plateaus around episodes 800–2,300 and then climbs again.
-- **Tile rates.** These show the share of the last 500 games that reached 1024, 2048 and 4096.
-- **Loss going up is expected here.** The network predicts the points still to come, and those values grow as the agent survives longer (a 2048 game is worth roughly 4× a 512 game). Bigger targets mean bigger squared errors, even when the relative error is flat.
+- **Score.** Each dot is one game and the line is the 100-game average. Progress plateaus around episodes 800–2,300, climbs to about 17K by episode 3,500, and then levels off.
+- **Tile rates.** These show the share of the last 500 games that reached 1024, 2048 and 4096. Since episode 3,500 they hold at about 80% for 1024 and 30% for 2048.
+- **Loss going up is expected here.** The network predicts the points still to come, and those values grow as the agent survives longer (a 2048 game is worth roughly 4× a 512 game). Bigger targets mean bigger squared errors, even when the relative error is flat. The spike near episode 4,800 lines up with a short score dip, and both recovered on their own.
 
 Regenerate the charts with `python -m CNN.plot_training` (needs `matplotlib`).
 
