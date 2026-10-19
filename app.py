@@ -71,6 +71,7 @@ def get_afterstate_agent():
         channels=args.get("channels", 128),
         hidden=args.get("hidden", 256),
         gamma=args.get("gamma", 1.0),
+        arch=args.get("arch", "v1"),
     )
     agent.load_state_dict(state.get("agent"))
     _afterstate_reward_scale = args.get("reward_scale", 1e-3)

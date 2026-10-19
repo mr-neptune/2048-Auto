@@ -133,12 +133,27 @@ def lambda_returns(rewards, values, gamma: float, lam: float) -> np.ndarray:
 
 # ------------------------------ Value network -------------------------------
 
-def build_vnet(channels: int = 128, hidden: int = 256) -> keras.Model:
+def build_vnet(channels: int = 128, hidden: int = 256, arch: str = "v1") -> keras.Model:
+    """
+    v1: pair/triple/2x2 directional maps -> Dense(hidden) -> V.
+    v2: v1 maps plus full-row (1x4), full-column (4x1) and 2x3 / 3x2 block detectors,
+        and a deeper head Dense(2*hidden) -> Dense(hidden) -> V.
+    """
     inp = keras.Input(shape=(4, 4, N_CHANNELS))
     h1, h2 = conv_block_h(inp, channels)
     v1, v2 = conv_block_v(inp, channels)
     x1, x2 = cross_maps(h1, v1, channels)
-    feats = layers.Concatenate()([layers.Flatten()(t) for t in (h1, h2, v1, v2, x1, x2)])
+    maps = [h1, h2, v1, v2, x1, x2]
+    if arch == "v2":
+        maps += [
+            layers.Conv2D(channels, (1, 4), padding="valid", activation="relu")(inp),  # 4x1: whole rows
+            layers.Conv2D(channels, (4, 1), padding="valid", activation="relu")(inp),  # 1x4: whole columns
+            layers.Conv2D(channels, (2, 3), padding="valid", activation="relu")(inp),  # 3x2
+            layers.Conv2D(channels, (3, 2), padding="valid", activation="relu")(inp),  # 2x3
+        ]
+    feats = layers.Concatenate()([layers.Flatten()(t) for t in maps])
+    if arch == "v2":
+        feats = layers.Dense(2 * hidden, activation="relu")(feats)
     trunk = layers.Dense(hidden, activation="relu")(feats)
     out = layers.Dense(1, activation=None)(trunk)
     return keras.Model(inp, out)
@@ -146,13 +161,13 @@ def build_vnet(channels: int = 128, hidden: int = 256) -> keras.Model:
 
 class AfterstateAgent:
     def __init__(self, channels: int = 128, hidden: int = 256, lr: float = 1e-4, gamma: float = 1.0,
-                 clip_norm: float = 1.0, seed: int = 42) -> None:
+                 clip_norm: float = 1.0, seed: int = 42, arch: str = "v1") -> None:
         self.gamma = gamma
         self.clip_norm = clip_norm
         random.seed(seed)
         np.random.seed(seed)
         tf.random.set_seed(seed)
-        self.v = build_vnet(channels=channels, hidden=hidden)
+        self.v = build_vnet(channels=channels, hidden=hidden, arch=arch)
         self.opt = keras.optimizers.Adam(learning_rate=lr)
         self.opt.build(self.v.trainable_variables)
 
@@ -294,6 +309,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--channels", type=int, default=128)
     p.add_argument("--hidden", type=int, default=256)
+    p.add_argument("--arch", choices=("v1", "v2"), default="v1", help="v2 adds row/column/block detectors and a deeper head")
     p.add_argument("--buffer-size", type=int, default=50_000)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--replay-ratio", type=float, default=8.0, help="Average number of times each afterstate is trained on")
@@ -314,7 +330,8 @@ def main() -> None:
         tf.config.set_visible_devices([], "GPU")
 
     env = Game2048()
-    agent = AfterstateAgent(channels=args.channels, hidden=args.hidden, lr=args.lr, gamma=args.gamma, seed=args.seed)
+    agent = AfterstateAgent(channels=args.channels, hidden=args.hidden, lr=args.lr, gamma=args.gamma, seed=args.seed,
+                            arch=args.arch)
     buffer = ReturnBuffer(args.buffer_size)
 
     start_episode = 1
