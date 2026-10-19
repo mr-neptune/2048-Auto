@@ -8,7 +8,7 @@ const AUTO_PLAY_SPEEDS = {
 };
 const AUTO_PLAY_CHECK_INTERVAL = 60;
 const NOT_IMPLEMENTED_METHODS = new Set(['algorithm', 'smart']);
-const AGENT_METHODS = new Set(['cnn', 'afterstate']); // server-side agents; value is sent as `model`
+const AGENT_METHODS = new Set(['cnn', 'afterstate', 'afterstate_search']); // server-side agents; value is sent as `model`
 
 let tileContainer = null;
 let tilesState = new Map();
