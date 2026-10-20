@@ -65,7 +65,7 @@ body {
     background: #f3e6d4;
     border-radius: 10px;
     padding: 20px;
-    width: 220px;
+    width: 260px;
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
 }
 
@@ -88,7 +88,7 @@ body {
 
 .control-option {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     margin-bottom: 8px;
     cursor: pointer;
@@ -97,11 +97,22 @@ body {
 
 .control-option input[type="radio"] {
     accent-color: #8f7a66;
+    margin-top: 3px;
 }
 
 .control-option small {
     font-size: 12px;
     color: #9b8b7f;
+}
+
+.control-option > span {
+    min-width: 0;  /* let long option notes wrap inside the panel */
+}
+
+.control-option .option-note {
+    display: block;
+    margin-top: 2px;
+    line-height: 1.35;
 }
 
 .button-auto-play {
@@ -313,6 +324,7 @@ body {
     }
 
     .control-panel {
+        box-sizing: border-box;
         width: 100%;
         max-width: 500px;
     }

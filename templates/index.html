@@ -16,19 +16,25 @@
                     <p class="control-label">Method</p>
                     <label class="control-option">
                         <input type="radio" name="play-method" value="random" checked>
-                        <span>Random Movements</span>
+                        <span>Random moves</span>
                     </label>
                     <label class="control-option">
                         <input type="radio" name="play-method" value="cnn">
-                        <span>CNN Agent (pure eval)</span>
+                        <span>Old CNN: move scorer <small>(retired)</small>
+                            <small class="option-note">Learned to score each of the 4 moves directly. The random new tile made that too noisy to learn: it never reached 1024.</small>
+                        </span>
                     </label>
                     <label class="control-option">
                         <input type="radio" name="play-method" value="afterstate">
-                        <span>CNN Afterstate (new)</span>
+                        <span>New CNN: board scorer
+                            <small class="option-note">Slides the tiles itself, then scores the board before the new tile appears. Trained on the real game score.</small>
+                        </span>
                     </label>
                     <label class="control-option">
                         <input type="radio" name="play-method" value="afterstate_search">
-                        <span>CNN Afterstate + look-ahead</span>
+                        <span>New CNN + look-ahead
+                            <small class="option-note">Same network, but also checks every place the next tile could land before moving. Strongest, slower.</small>
+                        </span>
                     </label>
                 </div>
                 <div class="control-section">
