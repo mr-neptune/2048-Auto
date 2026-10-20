@@ -117,6 +117,17 @@ Each experiment changes exactly one thing and is judged on the same 500 greedy t
 
 The look-ahead row measures a different thing from the others. It doesn't change the network; it spends about 8× more computation per move to think one tile spawn ahead. Its results are always reported separately from greedy play.
 
+**Combining the two training changes.** Both networks get the same recipe here (5K episodes at a constant learning rate, then a shrinking rate from 5K to 7K), so only the network differs:
+
+| 7K episodes, shrinking LR | Reached 2048 | Reached 4096 | Reached 8192 | Avg score | Best score |
+|---|---|---|---|---|---|
+| Original network, greedy | 58.4% | 12.6% | 0% | 27.0K | 79.5K |
+| **Bigger network, greedy** | **69.6%** | **17.2%** | 0% | **31.0K** | 79.6K |
+| Original network + look-ahead | 93.6% | 71.4% | 4.0% | 62.1K | **132.3K** |
+| **Bigger network + look-ahead** | **96.0%** | **76.0%** | **4.4%** | **65.2K** | 130.6K |
+
+The two training changes stack: the bigger network with a shrinking learning rate beats the original network trained 3K episodes longer (65.8% reached 2048 at 10K). With look-ahead, both players reach 8192 in about 4% of games.
+
 ## Getting started
 
 ```bash
