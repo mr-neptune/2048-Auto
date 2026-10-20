@@ -7,7 +7,6 @@ const AUTO_PLAY_SPEEDS = {
     fast: 220,
 };
 const AUTO_PLAY_CHECK_INTERVAL = 60;
-const NOT_IMPLEMENTED_METHODS = new Set(['algorithm', 'smart']);
 const AGENT_METHODS = new Set(['cnn', 'afterstate', 'afterstate_search']); // server-side agents; value is sent as `model`
 
 let tileContainer = null;
@@ -558,11 +557,7 @@ function setupAutoPlayControls() {
             if (autoPlayActive) {
                 return;
             }
-            if (NOT_IMPLEMENTED_METHODS.has(input.value)) {
-                setControlStatus('This method will be available soon. Choose Random Movements to auto play.', 'info');
-            } else {
-                setControlStatus('', '');
-            }
+            setControlStatus('', '');
         });
     });
 
@@ -573,10 +568,6 @@ function setupAutoPlayControls() {
 
 function startAutoPlay() {
     const method = getSelectedMethod();
-    if (NOT_IMPLEMENTED_METHODS.has(method)) {
-        setControlStatus('This method will be available soon. Please choose Random Movements to start.', 'warning');
-        return;
-    }
 
     if (autoPlayTimer) {
         clearTimeout(autoPlayTimer);
@@ -645,7 +636,7 @@ function runAutoPlayStep() {
     const action = selectActionForMethod(method);
 
     if (action === null) {
-        stopAutoPlay('Selected method is not available yet. Please choose Random Movements.', 'warning');
+        stopAutoPlay('Unknown play method. Please choose another option.', 'warning');
         return;
     }
 
@@ -676,12 +667,8 @@ function selectActionForMethod(method) {
     switch (method) {
         case 'random':
             return Math.floor(Math.random() * 4);
-        case 'cnn':
-            return null;
-        case 'algorithm':
-        case 'smart':
         default:
-            return null;
+            return null;  // agent methods are handled server-side via AGENT_METHODS
     }
 }
 
