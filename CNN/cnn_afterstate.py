@@ -251,10 +251,12 @@ def run_episode(agent: AfterstateAgent, env: Game2048, *, reward_scale: float, e
 
 
 def scheduled_lr(args, episode: int) -> float:
-    """Cosine decay from --lr to --lr-min over episodes [--lr-decay-start, --episodes]; constant otherwise."""
+    """Cosine decay from --lr to --lr-min over episodes [--lr-decay-start, --lr-decay-end]; constant otherwise.
+    --lr-decay-end defaults to --episodes; set it beyond --episodes to stop a run mid-decay and resume later."""
     if args.lr_schedule != "cosine":
         return args.lr
-    span = max(1, args.episodes - args.lr_decay_start)
+    end = args.lr_decay_end if args.lr_decay_end > 0 else args.episodes
+    span = max(1, end - args.lr_decay_start)
     progress = min(1.0, max(0.0, (episode - args.lr_decay_start) / span))
     return args.lr_min + 0.5 * (args.lr - args.lr_min) * (1.0 + math.cos(math.pi * progress))
 
@@ -343,6 +345,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant")
     p.add_argument("--lr-min", type=float, default=1e-5, help="Final learning rate for --lr-schedule cosine")
     p.add_argument("--lr-decay-start", type=int, default=0, help="Episode where the cosine decay begins")
+    p.add_argument("--lr-decay-end", type=int, default=0, help="Episode where the cosine decay reaches --lr-min (0 = --episodes)")
     p.add_argument("--channels", type=int, default=128)
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--arch", choices=("v1", "v2"), default="v1", help="v2 adds row/column/block detectors and a deeper head")
