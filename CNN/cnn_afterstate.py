@@ -335,6 +335,8 @@ def parse_args() -> argparse.Namespace:
                    help="Also keep a copy <save-path stem>_ep<N> every N episodes (0 to disable)")
     p.add_argument("--log-interval", type=int, default=100)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--threads", type=int, default=0,
+                   help="Cap TensorFlow CPU threads to leave cores free for other apps (0 = use all cores)")
     p.add_argument("--device", type=str, default="/CPU:0", help="/CPU:0 is ~2x faster than Metal /GPU:0 on Apple silicon; use /GPU:0 on CUDA")
 
     p.add_argument("--gamma", type=float, default=1.0)
@@ -369,6 +371,10 @@ def main() -> None:
     args = parse_args()
     if args.device.upper().startswith("/CPU"):
         tf.config.set_visible_devices([], "GPU")
+    if args.threads > 0:
+        # must run before TensorFlow creates its thread pools
+        tf.config.threading.set_intra_op_parallelism_threads(args.threads)
+        tf.config.threading.set_inter_op_parallelism_threads(min(2, args.threads))
 
     env = Game2048()
     agent = AfterstateAgent(channels=args.channels, hidden=args.hidden, lr=args.lr, gamma=args.gamma, seed=args.seed,
