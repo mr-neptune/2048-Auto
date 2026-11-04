@@ -14,10 +14,11 @@ learners (n-tuple TD players, CNN value nets) are trained.
  - TD(lambda) returns built at episode end from values computed while acting
  - Replay buffer of (afterstate, return) with all 8 board symmetries as augmentation
    (V is symmetry-invariant, so no action remapping is needed)
- - Atomic periodic checkpoints and --resume, so interrupted runs continue
+ - Atomic periodic checkpoints and --resume, so interrupted training and test runs continue
 """
 
 import argparse
+import csv
 import math
 import os
 import pickle
@@ -282,9 +283,14 @@ def tile_rates(max_tiles) -> dict:
 
 
 def evaluate(agent: AfterstateAgent, env: Game2048, games: int, reward_scale: float, writer=None, handle=None,
-             search_depth: int = 1):
-    scores, tiles = [], []
-    for g in range(1, games + 1):
+             search_depth: int = 1, done=(), on_game=None):
+    """Play test games up to `games`. `done` holds games already finished by an interrupted run of the same
+    test (they are rewritten to the CSV and count in the summary); on_game(g) runs after game g is logged."""
+    scores, tiles = [s.score for s in done], [s.max_tile for s in done]
+    for g, stats in enumerate(done, 1):
+        if writer is not None:
+            writer.writerow([g, stats.score, stats.reward, stats.moves, stats.max_tile, 0.0])
+    for g in range(len(done) + 1, games + 1):
         if search_depth >= 2:
             stats = run_search_episode(agent, env, reward_scale=reward_scale)
         else:
@@ -294,7 +300,9 @@ def evaluate(agent: AfterstateAgent, env: Game2048, games: int, reward_scale: fl
         if writer is not None:
             writer.writerow([g, stats.score, stats.reward, stats.moves, stats.max_tile, 0.0])
             handle.flush()
-    print(f"[Evaluation] {games} games | avg score={mean(scores):.0f} | best score={max(scores)}")
+        if on_game is not None:
+            on_game(g)
+    print(f"[Evaluation] {len(scores)} games | avg score={mean(scores):.0f} | best score={max(scores)}")
     for t, rate in tile_rates(tiles).items():
         print(f"  reached {t:>5}: {rate * 100:6.2f}%")
     return scores, tiles
@@ -322,13 +330,64 @@ def load_checkpoint(path: str) -> dict:
         return pickle.load(h)
 
 
+def eval_progress_path(metrics_path: str) -> Path:
+    return Path(metrics_path).with_suffix(".progress")
+
+
+def save_eval_progress(metrics_path: str, test: dict, games_done: int) -> None:
+    """Record the random generators after each test game, so a stopped test continues with the same tile spawns."""
+    p = eval_progress_path(metrics_path)
+    payload = {"test": test, "games_done": games_done, "np_rng": np.random.get_state(), "py_rng": random.getstate()}
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with tmp.open("wb") as h:
+        pickle.dump(payload, h, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, p)
+
+
+def resume_eval(metrics_path: str, test: dict) -> list:
+    """Return the games an interrupted run of the same test finished, and restore the random generators to where
+    it stopped. A CSV row written after the last progress save is dropped and that game is played again."""
+    p = eval_progress_path(metrics_path)
+    if not p.exists():
+        return []
+    progress = load_checkpoint(str(p))
+    if progress["test"] != test:
+        print(f"'{p}' is from a different test ({progress['test']}); starting from game 1")
+        return []
+    with Path(metrics_path).open(newline="") as h:
+        rows = list(csv.reader(h))[1:]
+    n = progress["games_done"]
+    if len(rows) < n:
+        print(f"'{metrics_path}' has {len(rows)} games but '{p}' expects {n}; starting from game 1")
+        return []
+    np.random.set_state(progress["np_rng"])
+    random.setstate(progress["py_rng"])
+    print(f"Resumed test from '{metrics_path}' after game {n}")
+    return [EpisodeStats(reward=float(r[2]), score=int(r[1]), moves=int(r[3]), max_tile=int(r[4])) for r in rows[:n]]
+
+
+def run_evaluation(args, agent: AfterstateAgent, env: Game2048, games: int, weights: dict) -> None:
+    """Play the test games; with --resume, continue an interrupted run of the same test in --eval-metrics-path."""
+    path = args.eval_metrics_path
+    test = {**weights, "search_depth": args.search_depth, "seed": args.seed}
+    done = resume_eval(path, test) if args.resume and path else []
+    writer, handle = prepare_metrics_writer(path, append=False)
+    on_game = (lambda g: save_eval_progress(path, test, g)) if path else None
+    try:
+        evaluate(agent, env, games, args.reward_scale, writer, handle, args.search_depth, done, on_game)
+    finally:
+        if handle:
+            handle.close()
+
+
 # ---------------------------------- CLI -------------------------------------
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--episodes", type=int, default=2000, help="Total episodes (a resumed run continues up to this number)")
     p.add_argument("--save-path", type=str, default="", help="Checkpoint path (also the --resume source)")
-    p.add_argument("--resume", action="store_true", help="Continue from --save-path if it exists")
+    p.add_argument("--resume", action="store_true",
+                   help="Continue from --save-path if it exists, and continue a stopped test in --eval-metrics-path")
     p.add_argument("--load-path", type=str, default="", help="Load weights only (fresh replay, episode counter from 1)")
     p.add_argument("--checkpoint-interval", type=int, default=200)
     p.add_argument("--snapshot-interval", type=int, default=0,
@@ -382,21 +441,22 @@ def main() -> None:
     buffer = ReturnBuffer(args.buffer_size)
 
     start_episode = 1
+    weights = {"checkpoint": "", "episode": 0}  # identifies the network a test run belongs to
     if args.resume and args.save_path and Path(args.save_path).exists():
         ckpt = load_checkpoint(args.save_path)
         agent.load_state_dict(ckpt["agent"])
         buffer.load_state(ckpt.get("replay"))
         start_episode = int(ckpt.get("episode", 0)) + 1
+        weights = {"checkpoint": str(Path(args.save_path).resolve()), "episode": start_episode - 1}
         print(f"Resumed from '{args.save_path}' at episode {start_episode}")
     elif args.load_path:
-        agent.load_state_dict(load_checkpoint(args.load_path)["agent"])
+        ckpt = load_checkpoint(args.load_path)
+        agent.load_state_dict(ckpt["agent"])
+        weights = {"checkpoint": str(Path(args.load_path).resolve()), "episode": int(ckpt.get("episode", 0))}
         print(f"Loaded weights from '{args.load_path}'")
 
     if args.eval_only:
-        writer, handle = prepare_metrics_writer(args.eval_metrics_path, append=False)
-        evaluate(agent, env, max(1, args.eval_episodes), args.reward_scale, writer, handle, args.search_depth)
-        if handle:
-            handle.close()
+        run_evaluation(args, agent, env, max(1, args.eval_episodes), weights)
         return
 
     metrics_writer, metrics_file = prepare_metrics_writer(args.metrics_path, append=start_episode > 1)
@@ -446,10 +506,8 @@ def main() -> None:
                 save_checkpoint(snapshot_path(args.save_path, episode), agent, buffer, episode, args)
 
         if args.eval_episodes > 0:
-            writer, handle = prepare_metrics_writer(args.eval_metrics_path, append=False)
-            evaluate(agent, env, args.eval_episodes, args.reward_scale, writer, handle, args.search_depth)
-            if handle:
-                handle.close()
+            weights = {"checkpoint": str(Path(args.save_path).resolve()) if args.save_path else "", "episode": last_done}
+            run_evaluation(args, agent, env, args.eval_episodes, weights)
     finally:
         if metrics_file:
             metrics_file.close()
