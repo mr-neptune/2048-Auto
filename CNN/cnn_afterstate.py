@@ -270,11 +270,8 @@ def tile_rates(max_tiles) -> dict:
 def evaluate(agent: AfterstateAgent, env: Game2048, games: int, reward_scale: float, writer=None, handle=None,
              search_depth: int = 1, done=(), on_game=None):
     """Play test games up to `games`. `done` holds games already finished by an interrupted run of the same
-    test (they are rewritten to the CSV and count in the summary); on_game(g) runs after game g is logged."""
+    test (already in the CSV; they count in the summary); on_game(g) runs after game g is logged."""
     scores, tiles = [s.score for s in done], [s.max_tile for s in done]
-    for g, stats in enumerate(done, 1):
-        if writer is not None:
-            writer.writerow([g, stats.score, stats.reward, stats.moves, stats.max_tile, 0.0])
     for g in range(len(done) + 1, games + 1):
         if search_depth >= 2:
             stats = run_search_episode(agent, env, reward_scale=reward_scale)
@@ -340,11 +337,16 @@ def resume_eval(metrics_path: str, test: dict) -> list:
         print(f"'{p}' is from a different test ({progress['test']}); starting from game 1")
         return []
     with Path(metrics_path).open(newline="") as h:
-        rows = list(csv.reader(h))[1:]
+        header, *rows = list(csv.reader(h))
     n = progress["games_done"]
     if len(rows) < n:
         print(f"'{metrics_path}' has {len(rows)} games but '{p}' expects {n}; starting from game 1")
         return []
+    if len(rows) > n:
+        tmp = Path(metrics_path).with_suffix(".csv.tmp")
+        with tmp.open("w", newline="") as h:
+            csv.writer(h).writerows([header, *rows[:n]])
+        os.replace(tmp, metrics_path)  # atomic: the finished games are never missing from the CSV
     np.random.set_state(progress["np_rng"])
     random.setstate(progress["py_rng"])
     print(f"Resumed test from '{metrics_path}' after game {n}")
@@ -356,7 +358,7 @@ def run_evaluation(args, agent: AfterstateAgent, env: Game2048, games: int, weig
     path = args.eval_metrics_path
     test = {**weights, "search_depth": args.search_depth, "seed": args.seed}
     done = resume_eval(path, test) if args.resume and path else []
-    writer, handle = prepare_metrics_writer(path, append=False)
+    writer, handle = prepare_metrics_writer(path, append=bool(done))
     on_game = (lambda g: save_eval_progress(path, test, g)) if path else None
     try:
         evaluate(agent, env, games, args.reward_scale, writer, handle, args.search_depth, done, on_game)
