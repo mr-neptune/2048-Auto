@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import tensorflow as tf
 from flask import Flask, jsonify, request, render_template
 
 from CNN.cnn_agent import DQNAgent, board_to_onehot, load_checkpoint
@@ -9,13 +10,16 @@ from CNN.cnn_afterstate import AfterstateAgent, board_to_exp, legal_afterstates
 from CNN.afterstate_search import expectimax_action
 from game2048 import Game2048
 
+# Run the networks on the CPU, as training and testing do: the Metal GPU plugin returns wrong board values
+tf.config.set_visible_devices([], "GPU")
+
 app = Flask(__name__)
 game = Game2048()  # Initialize game here
 
 # ------------------------- CNN agent (pure eval) -------------------------
 CNN_CKPT_PATH = os.environ.get("CNN_CKPT_PATH", "bin/cnn_v3_09.chkpt")
 CNN_CHANNELS = int(os.environ.get("CNN_CHANNELS", "128"))
-CNN_DEVICE = os.environ.get("CNN_DEVICE", "/GPU:0")
+CNN_DEVICE = os.environ.get("CNN_DEVICE", "/CPU:0")
 
 _cnn_agent = None
 
