@@ -54,7 +54,7 @@ def get_cnn_agent():
 
 
 # ------------------- CNN afterstate agent (pure eval) --------------------
-AFTERSTATE_CKPT_PATH = os.environ.get("AFTERSTATE_CKPT_PATH", "bin/cnn_after_pilot.chkpt")
+AFTERSTATE_CKPT_PATH = os.environ.get("AFTERSTATE_CKPT_PATH", "bin/cnn_after_v2lr20_ep20000.chkpt")
 
 _afterstate_agent = None
 _afterstate_reward_scale = 1e-3
