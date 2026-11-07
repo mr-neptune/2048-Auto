@@ -6,11 +6,23 @@ The game logic is implemented in Python 3, and the user interface is implemented
 
 ## Demo
 
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/images/demo_4096.gif" alt="The current player auto-playing 2048 in the browser UI, merging a chain of 2048, 1024, 512, 256 and 128 into a 4096 tile"><br/><b>Building a 4096</b></td>
+    <td align="center" width="50%"><img src="docs/images/demo_almost_8192.gif" alt="The current player auto-playing 2048 in the browser UI until the game ends at 80,576 points, with every tile from 8 up to 4096 on the board"><br/><b>Almost 8192</b></td>
+  </tr>
+</table>
+
+The current player, the bigger network after 20,000 training episodes with look-ahead, in the browser UI. These are the last 20 seconds of two games:
+
+- **Building a 4096.** It merges a chain of 2048, 1024, 512, 256 and 128 into a 4096 tile, and the game continues.
+- **Almost 8192.** The game ends at 80,576 points. The board holds every tile from 8 up to 4096, which together add up to just over 8192, but they aren't lined up to merge and the board fills up.
+
 <p align="center">
-  <img src="docs/images/demo_2048.gif" width="600" alt="The afterstate CNN agent auto-playing 2048 in the browser UI, finishing a game with a 2048 tile at 26,964 points">
+  <img src="docs/images/demo_2048.gif" width="480" alt="An early version of the afterstate CNN agent auto-playing 2048 in the browser UI, finishing a game with a 2048 tile at 26,964 points">
 </p>
 
-The final moves of a game played by an early version of the afterstate CNN agent (the original network after 3,000 training episodes, no look-ahead): it builds a 2048 tile and ends at 26,964 points. The current player is much stronger (see [Results](#results)).
+For comparison, an early version of the agent (the original network after 3,000 training episodes, no look-ahead): it builds a 2048 tile and ends at 26,964 points.
 
 To watch it yourself, start the app (see [Getting started](#getting-started)), open http://localhost:5001, pick **New CNN + look-ahead** and press **Start Auto Play**. The app loads `bin/cnn_after_v2lr20_ep20000.chkpt`, the bigger network after 20,000 training episodes; set `AFTERSTATE_CKPT_PATH` to use another checkpoint. **New CNN: board scorer** plays the same network without look-ahead, and **Old CNN: move scorer** is the retired DQN, kept for comparison.
 
