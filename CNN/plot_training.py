@@ -1,11 +1,14 @@
 """
 Plot afterstate-agent training progress for the README: score, tile-reach rates, and loss.
 
-Reads the per-episode metrics CSV and the training stdout log (loss is only printed there,
-every --log-interval episodes), and writes a light and a dark PNG.
+Reads the per-episode metrics CSVs and the training stdout logs (loss is only printed there,
+every --log-interval episodes), and writes a light and a dark PNG. A run continued from another
+run's checkpoint is given as several files in order; for an episode in more than one file, the
+later file wins (the bigger network's 5K→20K run continued from episode 5,000 of its first run).
 
-  python -m CNN.plot_training --train-csv CNN/logs/cnn_after_pilot_train.csv \
-      --log CNN/logs/cnn_after_pilot.out --out-dir docs/images
+  python -m CNN.plot_training \
+      --train-csv CNN/logs/cnn_after_v2_train.csv CNN/logs/cnn_after_v2lr20_train.csv \
+      --log CNN/logs/cnn_after_v2.out CNN/logs/cnn_after_v2lr20.out --out-dir docs/images
 """
 
 import argparse
@@ -26,26 +29,30 @@ THEMES = {
     "dark": dict(surface="#1a1a19", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", series=["#3987e5", "#d95926", "#199e70"]),
 }
-RATE_TILES = (1024, 2048, 4096)
+RATE_TILES = (2048, 4096, 8192)
 LOSS_RE = re.compile(r"Episode\s+(\d+):.*loss=([0-9.]+)")
 
 
-def load_train(path: str):
-    with open(path) as f:
-        rows = list(csv.DictReader(f))
-    episodes = np.array([int(r["episode"]) for r in rows])
-    scores = np.array([int(r["score"]) for r in rows])
-    tiles = np.array([int(r["max_tile"]) for r in rows])
+def load_train(paths):
+    games = {}  # episode -> (score, max tile); later files win
+    for path in paths:
+        with open(path) as f:
+            for r in csv.DictReader(f):
+                games[int(r["episode"])] = (int(r["score"]), int(r["max_tile"]))
+    episodes = np.array(sorted(games))
+    scores = np.array([games[e][0] for e in episodes])
+    tiles = np.array([games[e][1] for e in episodes])
     return episodes, scores, tiles
 
 
-def load_loss(path: str):
-    points = {}
-    with open(path) as f:
-        for line in f:
-            m = LOSS_RE.search(line)
-            if m and float(m.group(2)) > 0:  # loss=0 before the replay warmup ends
-                points[int(m.group(1))] = float(m.group(2))
+def load_loss(paths):
+    points = {}  # episode -> loss; later files win
+    for path in paths:
+        with open(path) as f:
+            for line in f:
+                m = LOSS_RE.search(line)
+                if m and float(m.group(2)) > 0:  # loss=0 before the replay warmup ends
+                    points[int(m.group(1))] = float(m.group(2))
     eps = np.array(sorted(points))
     return eps, np.array([points[e] for e in eps])
 
@@ -75,7 +82,16 @@ def end_label(ax, x, y, text, t) -> None:
                 color=t["ink2"], fontsize=9, annotation_clip=False)
 
 
-def plot(theme: str, train, loss, out: Path, score_window: int, rate_window: int) -> None:
+def mark_episode(axes, x, label: str, t) -> None:
+    """Dashed reference line on every panel, labeled once on the top panel."""
+    for ax in axes:
+        ax.axvline(x, color=t["axis"], linewidth=1, linestyle=(0, (4, 3)), zorder=1)
+    axes[0].annotate(label, (x, 1), xycoords=("data", "axes fraction"), xytext=(6, -2), textcoords="offset points",
+                     va="top", color=t["ink2"], fontsize=9)
+
+
+def plot(theme: str, train, loss, out: Path, score_window: int, rate_window: int, lr_decay_start: int,
+         title: str) -> None:
     t = THEMES[theme]
     episodes, scores, tiles = train
     loss_eps, loss_vals = loss
@@ -93,7 +109,7 @@ def plot(theme: str, train, loss, out: Path, score_window: int, rate_window: int
     ax_s.plot(episodes[score_window - 1:], sm, color=t["series"][0], linewidth=2, solid_capstyle="round", zorder=3)
     end_label(ax_s, x_max, sm[-1], compact(sm[-1]), t)
     ax_s.yaxis.set_major_formatter(FuncFormatter(compact))
-    ax_s.set_ylim(0, np.percentile(scores, 99.5) * 1.05)
+    ax_s.set_ylim(0, scores.max() * 1.05)  # keep the rare top games (8192 tiles) in view
 
     # 2) share of games reaching each tile, trailing window
     style_axis(ax_r, t, f"Games reaching tile  ·  {rate_window}-game rolling share")
@@ -117,9 +133,10 @@ def plot(theme: str, train, loss, out: Path, score_window: int, rate_window: int
     ax_l.set_xlabel("Episode (games played)", color=t["ink2"], fontsize=9.5, labelpad=8)
     ax_l.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:,.0f}"))
     ax_l.set_xlim(0, x_max)
+    if lr_decay_start > 0:
+        mark_episode((ax_s, ax_r, ax_l), lr_decay_start, "learning rate starts shrinking", t)
 
-    fig.suptitle("Afterstate CNN · training progress", x=0.075, y=0.975, ha="left",
-                 color=t["ink"], fontsize=14, fontweight="semibold")
+    fig.suptitle(title, x=0.075, y=0.975, ha="left", color=t["ink"], fontsize=14, fontweight="semibold")
     fig.subplots_adjust(left=0.075, right=0.86, top=0.92, bottom=0.07)
     fig.savefig(out, dpi=150, facecolor=t["surface"])
     plt.close(fig)
@@ -128,18 +145,22 @@ def plot(theme: str, train, loss, out: Path, score_window: int, rate_window: int
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--train-csv", default="CNN/logs/cnn_after_pilot_train.csv")
-    p.add_argument("--log", default="CNN/logs/cnn_after_pilot.out")
+    p.add_argument("--train-csv", nargs="+",
+                   default=["CNN/logs/cnn_after_v2_train.csv", "CNN/logs/cnn_after_v2lr20_train.csv"])
+    p.add_argument("--log", nargs="+", default=["CNN/logs/cnn_after_v2.out", "CNN/logs/cnn_after_v2lr20.out"])
     p.add_argument("--out-dir", default="docs/images")
     p.add_argument("--score-window", type=int, default=100)
     p.add_argument("--rate-window", type=int, default=500)
+    p.add_argument("--lr-decay-start", type=int, default=5000, help="Mark this episode on every panel (0 = no mark)")
+    p.add_argument("--title", default="Afterstate CNN, bigger network · training progress")
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     train, loss = load_train(args.train_csv), load_loss(args.log)
     for theme in THEMES:
-        plot(theme, train, loss, out_dir / f"training_progress_{theme}.png", args.score_window, args.rate_window)
+        plot(theme, train, loss, out_dir / f"training_progress_{theme}.png", args.score_window, args.rate_window,
+             args.lr_decay_start, args.title)
 
 
 if __name__ == "__main__":
