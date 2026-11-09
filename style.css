@@ -198,9 +198,9 @@ body {
     font-weight: bold;
     font-size: 32px;
     border-radius: 5px;
-    transform: translate(var(--x, 0px), var(--y, 0px));
-    transition: transform 0.18s ease-in-out;
-    will-change: transform;
+    translate: var(--x, 0px) var(--y, 0px); /* separate from the pop animations, which use transform */
+    transition: translate 0.18s ease-in-out;
+    will-change: translate;
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
     z-index: 2;
 }
@@ -227,24 +227,24 @@ body {
 
 @keyframes tileAppear {
     from {
-        transform: translate(var(--x, 0px), var(--y, 0px)) scale(0.3);
+        transform: scale(0.3);
         opacity: 0;
     }
     to {
-        transform: translate(var(--x, 0px), var(--y, 0px)) scale(1);
+        transform: scale(1);
         opacity: 1;
     }
 }
 
 @keyframes tileMerge {
     0% {
-        transform: translate(var(--x, 0px), var(--y, 0px)) scale(0.85);
+        transform: scale(0.85);
     }
     60% {
-        transform: translate(var(--x, 0px), var(--y, 0px)) scale(1.05);
+        transform: scale(1.05);
     }
     100% {
-        transform: translate(var(--x, 0px), var(--y, 0px)) scale(1);
+        transform: scale(1);
     }
 }
 
