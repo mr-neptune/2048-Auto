@@ -1,5 +1,8 @@
 # 2048-Auto
 
+<h2 align="center"><a href="https://mr-neptune.github.io/2048-Auto/">▶ Watch the agent play in your browser</a></h2>
+<p align="center">Pick a method and a speed. Nothing to install.</p>
+
 2048 is a well known puzzle game, where the player will move number tiles in a 4×4 grid to merge the number 2048, or even higher.
 
 The game logic is implemented in Python 3, and the user interface is implemented in HTML, CSS, and JavaScript. A small Flask server (`app.py`) exposes HTTP endpoints so the same environment can drive both the browser UI and automated agents.
@@ -26,7 +29,9 @@ How far the agent has come, in order. Each clip is the end of a game auto-played
   <img src="docs/images/demo_almost_8192.gif" width="600" alt="The current player auto-playing 2048 in the browser UI until the game ends at 80,576 points, with every tile from 8 up to 4096 on the board">
 </p>
 
-To watch it yourself, start the app (see [Getting started](#getting-started)), open http://localhost:5001, pick **New CNN + look-ahead** and press **Start Auto Play**. The app loads `bin/cnn_after_v2lr20_ep20000.chkpt`, the bigger network after 20,000 training episodes; set `AFTERSTATE_CKPT_PATH` to use another checkpoint. **New CNN: board scorer** plays the same network without look-ahead, and **Old CNN: move scorer** is the retired DQN, kept for comparison.
+To watch it yourself, open the **[web page](https://mr-neptune.github.io/2048-Auto/)**, pick **New CNN + look-ahead** and press **Start Auto Play**. **New CNN: board scorer** plays the same network without look-ahead, and **Old CNN: move scorer** is the retired DQN, kept for comparison.
+
+To run the app on your own machine, follow [Getting started](#getting-started) and open http://localhost:5001. The app loads `bin/cnn_after_v2lr20_ep20000.chkpt`, the bigger network after 20,000 training episodes; set `AFTERSTATE_CKPT_PATH` to use another checkpoint.
 
 ## CNN afterstate agent
 
